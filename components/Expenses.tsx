@@ -1,13 +1,17 @@
 
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { type ExpenseItem } from '../types';
 import { MagnifyingGlassIcon } from './Icons';
+import Pagination from './Pagination';
+
+const ITEMS_PER_PAGE = 20;
 
 interface ExpensesProps {
   expenses: ExpenseItem[];
   onAddExpense: (newExpense: Omit<ExpenseItem, 'id'>) => void;
 }
+
+const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(value);
 
 const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
   const [expenseName, setExpenseName] = useState('');
@@ -15,6 +19,11 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +57,13 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
       expense.category.toLowerCase().includes(lowerCaseQuery)
     );
   }, [expenses, searchQuery]);
+
+  const paginatedExpenses = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredExpenses.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredExpenses, currentPage]);
+  
+  let lastDate: string | null = null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
@@ -129,24 +145,53 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
                 className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-pink-500 focus:border-pink-500"
             />
           </div>
-          <div className="space-y-3 flex-1 overflow-y-auto pr-2">
-            {filteredExpenses.length > 0 ? filteredExpenses.map(expense => (
-              <div key={expense.id} className="bg-gray-50 p-3 rounded-lg border flex justify-between items-center transition-transform hover:scale-[1.02]">
-                <div>
-                  <p className="font-semibold text-gray-800">{expense.name}</p>
-                  <p className="text-sm text-gray-500">{expense.category}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-red-600">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(expense.amount)}</p>
-                  <p className="text-xs text-gray-400">{new Date(expense.date).toLocaleDateString('id-ID', {day: '2-digit', month: 'short', year: 'numeric'})}</p>
-                </div>
-              </div>
-            )) : (
-              <div className="flex items-center justify-center h-full text-center text-gray-500">
-                <p>Belum ada data pengeluaran.</p>
-              </div>
-            )}
+          <div className="flex-1 overflow-y-auto pr-2">
+            <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                        <th className="py-2 px-3 text-left font-medium text-gray-600">Nama</th>
+                        <th className="py-2 px-3 text-left font-medium text-gray-600">Kategori</th>
+                        <th className="py-2 px-3 text-right font-medium text-gray-600">Jumlah</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {paginatedExpenses.length > 0 ? (
+                        paginatedExpenses.map(expense => {
+                            const showDateHeader = expense.date !== lastDate;
+                            lastDate = expense.date;
+                            return (
+                                <React.Fragment key={expense.id}>
+                                    {showDateHeader && (
+                                    <tr className="bg-gray-100">
+                                        <td colSpan={3} className="py-2 px-3 font-semibold text-gray-800">
+                                            {new Date(expense.date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                                        </td>
+                                    </tr>
+                                    )}
+                                    <tr className="border-b">
+                                        <td className="py-3 px-3">{expense.name}</td>
+                                        <td className="py-3 px-3 text-gray-600">{expense.category}</td>
+                                        <td className="py-3 px-3 text-right font-semibold text-red-600">{formatCurrency(expense.amount)}</td>
+                                    </tr>
+                                </React.Fragment>
+                            );
+                        })
+                    ) : (
+                        <tr>
+                            <td colSpan={3} className="text-center py-16 text-gray-500">
+                                <p>Tidak ada data pengeluaran yang cocok.</p>
+                            </td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
           </div>
+          <Pagination
+            totalItems={filteredExpenses.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            currentPage={currentPage}
+            onPageChange={setCurrentPage}
+          />
         </div>
       </div>
     </div>

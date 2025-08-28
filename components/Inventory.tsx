@@ -1,8 +1,10 @@
 
-
-import React, { useState, useMemo } from 'react';
-import { type InventoryItem, type StockUsageRecord } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { type InventoryItem, type StockUsageRecord, type NotificationSettings } from '../types';
 import { MagnifyingGlassIcon } from './Icons';
+import Pagination from './Pagination';
+
+const ITEMS_PER_PAGE = 20;
 
 // Modal for viewing history
 const StockHistoryModal: React.FC<{
@@ -110,12 +112,18 @@ const UseStockModal: React.FC<{
 interface InventoryProps {
     inventory: InventoryItem[];
     onUseStock: (itemId: number, amountUsed: number, usageDate: string) => void;
+    notificationSettings: NotificationSettings;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ inventory, onUseStock }) => {
+const Inventory: React.FC<InventoryProps> = ({ inventory, onUseStock, notificationSettings }) => {
     const [historyItem, setHistoryItem] = useState<InventoryItem | null>(null);
     const [useStockItem, setUseStockItem] = useState<InventoryItem | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchQuery]);
 
     const handleConfirmUseStock = (item: InventoryItem, amount: number, usageDate: string) => {
         onUseStock(item.id, amount, usageDate);
@@ -123,7 +131,7 @@ const Inventory: React.FC<InventoryProps> = ({ inventory, onUseStock }) => {
     };
 
     const getStatus = (stock: number) => {
-        if (stock <= 5) return { text: 'Stok Menipis', color: 'bg-red-100 text-red-800' };
+        if (stock <= notificationSettings.lowStockThreshold) return { text: 'Stok Menipis', color: 'bg-red-100 text-red-800' };
         return { text: 'Tersedia', color: 'bg-cyan-100 text-cyan-800' };
     };
 
@@ -137,6 +145,11 @@ const Inventory: React.FC<InventoryProps> = ({ inventory, onUseStock }) => {
             item.sku.toLowerCase().includes(lowerCaseQuery)
         );
     }, [inventory, searchQuery]);
+
+    const paginatedInventory = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredInventory.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [filteredInventory, currentPage]);
 
     return (
         <>
@@ -167,7 +180,7 @@ const Inventory: React.FC<InventoryProps> = ({ inventory, onUseStock }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                            {filteredInventory.map(item => {
+                            {paginatedInventory.map(item => {
                                 const status = getStatus(item.stock);
                                 return (
                                     <tr key={item.id}>
@@ -205,12 +218,18 @@ const Inventory: React.FC<InventoryProps> = ({ inventory, onUseStock }) => {
                             })}
                         </tbody>
                     </table>
-                     {filteredInventory.length === 0 && (
+                     {paginatedInventory.length === 0 && (
                         <div className="text-center py-16 text-gray-500">
                             <p>Tidak ada data inventori yang cocok.</p>
                         </div>
                     )}
                 </div>
+                 <Pagination
+                    totalItems={filteredInventory.length}
+                    itemsPerPage={ITEMS_PER_PAGE}
+                    currentPage={currentPage}
+                    onPageChange={setCurrentPage}
+                />
             </div>
             {historyItem && <StockHistoryModal item={historyItem} onClose={() => setHistoryItem(null)} />}
             {useStockItem && <UseStockModal item={useStockItem} onClose={() => setUseStockItem(null)} onConfirm={(amount, usageDate) => handleConfirmUseStock(useStockItem, amount, usageDate)} />}

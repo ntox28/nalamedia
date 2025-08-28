@@ -1,3 +1,4 @@
+
 import type React from 'react';
 
 export type MenuKey =
@@ -290,6 +291,7 @@ export interface ReportsProps {
   legacyReceivables: LegacyReceivable[];
   assets: AssetItem[];
   debts: DebtItem[];
+  notificationSettings: NotificationSettings;
   onSetLegacyIncome: (data: LegacyIncome | null) => void;
   onSetLegacyExpense: (data: LegacyExpense | null) => void;
   onAddLegacyReceivable: (data: Omit<LegacyReceivable, 'id'>) => void;

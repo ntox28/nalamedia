@@ -4,6 +4,9 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { type ProductData, type CategoryData, type FinishingData, type CustomerData, type SupplierData, type EmployeeData } from '../types';
 import * as XLSX from 'xlsx';
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon } from './Icons';
+import Pagination from './Pagination';
+
+const ITEMS_PER_PAGE = 20;
 
 const TABS = [
     { key: 'products', label: 'Produk & Layanan' },
@@ -326,6 +329,7 @@ const MasterData: React.FC<MasterDataProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportExportModalOpen, setIsImportExportModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   
   useEffect(() => {
     if (accessibleTabs.length > 0 && !accessibleTabs.some(t => t.key === activeTab)) {
@@ -335,7 +339,12 @@ const MasterData: React.FC<MasterDataProps> = ({
 
   useEffect(() => {
       setSearchQuery('');
+      setCurrentPage(1);
   }, [activeTab]);
+  
+  useEffect(() => {
+      setCurrentPage(1);
+  }, [searchQuery]);
 
   const handleAddData = (data: any) => {
     switch (activeTab) {
@@ -461,6 +470,38 @@ const MasterData: React.FC<MasterDataProps> = ({
     }
   };
 
+  const { paginatedData, totalItems } = useMemo(() => {
+    const lowerCaseQuery = searchQuery.toLowerCase();
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    let data = [];
+
+    switch (activeTab) {
+        case 'products':
+            data = products.filter(p => p.name.toLowerCase().includes(lowerCaseQuery) || p.category.toLowerCase().includes(lowerCaseQuery));
+            break;
+        case 'categories':
+            data = categories.filter(c => c.name.toLowerCase().includes(lowerCaseQuery));
+            break;
+        case 'finishings':
+            data = finishings.filter(f => f.name.toLowerCase().includes(lowerCaseQuery));
+            break;
+        case 'customers':
+            data = customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery) || c.contact.toLowerCase().includes(lowerCaseQuery));
+            break;
+        case 'suppliers':
+            data = suppliers.filter(s => s.name.toLowerCase().includes(lowerCaseQuery) || s.contactPerson.toLowerCase().includes(lowerCaseQuery));
+            break;
+        case 'karyawan':
+            data = employees.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.contact.toLowerCase().includes(lowerCaseQuery));
+            break;
+    }
+
+    return {
+      paginatedData: data.slice(startIndex, startIndex + ITEMS_PER_PAGE),
+      totalItems: data.length,
+    };
+  }, [activeTab, searchQuery, currentPage, products, categories, finishings, customers, suppliers, employees]);
+  
   const renderContent = () => {
     // Reusable Table component
     const Table: React.FC<{headers: string[], children: React.ReactNode}> = ({headers, children}) => (
@@ -468,28 +509,23 @@ const MasterData: React.FC<MasterDataProps> = ({
     );
     const Td: React.FC<{children:React.ReactNode, className?: string}> = ({children, className}) => (<td className={`py-4 px-4 whitespace-nowrap text-sm ${className}`}>{children}</td>);
 
-    const lowerCaseQuery = searchQuery.toLowerCase();
-
     switch (activeTab) {
       case 'products':
-        const filteredProducts = products.filter(p => p.name.toLowerCase().includes(lowerCaseQuery) || p.category.toLowerCase().includes(lowerCaseQuery));
         return (
             <Table headers={["Nama Layanan/Produk", "Kategori", "Harga (EC/R/G/S/C)"]}>
-            {filteredProducts.map((product) => (<tr key={product.id}><Td className="font-medium text-gray-900">{product.name}</Td><Td className="text-gray-500">{product.category}</Td><Td className="text-gray-500 text-xs">{`${product.price.endCustomer/1000}k / ${product.price.retail/1000}k / ${product.price.grosir/1000}k / ${product.price.reseller/1000}k / ${product.price.corporate/1000}k`}</Td></tr>))}
+            {(paginatedData as ProductData[]).map((product) => (<tr key={product.id}><Td className="font-medium text-gray-900">{product.name}</Td><Td className="text-gray-500">{product.category}</Td><Td className="text-gray-500 text-xs">{`${product.price.endCustomer/1000}k / ${product.price.retail/1000}k / ${product.price.grosir/1000}k / ${product.price.reseller/1000}k / ${product.price.corporate/1000}k`}</Td></tr>))}
             </Table>
         );
       case 'categories':
-        const filteredCategories = categories.filter(c => c.name.toLowerCase().includes(lowerCaseQuery));
         return (
           <Table headers={["Nama Kategori", "Tipe Satuan"]}>
-              {filteredCategories.map((cat) => (<tr key={cat.id}><Td className="font-medium text-gray-900">{cat.name}</Td><Td className="text-gray-500">{cat.unitType}</Td></tr>))}
+              {(paginatedData as CategoryData[]).map((cat) => (<tr key={cat.id}><Td className="font-medium text-gray-900">{cat.name}</Td><Td className="text-gray-500">{cat.unitType}</Td></tr>))}
           </Table>
       );
       case 'finishings':
-        const filteredFinishings = finishings.filter(f => f.name.toLowerCase().includes(lowerCaseQuery));
         return (
             <Table headers={["Nama Finishing", "Harga", "Kategori Terkait"]}>
-                {filteredFinishings.map((f) => {
+                {(paginatedData as FinishingData[]).map((f) => {
                     const relatedCategories = f.categoryIds && f.categoryIds.length > 0
                         ? f.categoryIds.map(id => categories.find(c => c.id === id)?.name).filter(Boolean).join(', ')
                         : <span className="text-gray-400 italic">Semua Kategori</span>;
@@ -505,10 +541,9 @@ const MasterData: React.FC<MasterDataProps> = ({
             </Table>
       );
       case 'customers':
-        const filteredCustomers = customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery) || c.contact.toLowerCase().includes(lowerCaseQuery));
         return (
             <Table headers={["Nama Pelanggan", "Kontak", "Level Harga", "Tanggal Bergabung"]}>
-                {filteredCustomers.map((c) => (<tr key={c.id}><Td className="font-medium text-gray-900">{c.name}</Td><Td className="text-gray-500">{c.contact}</Td><Td className="text-gray-500"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                {(paginatedData as CustomerData[]).map((c) => (<tr key={c.id}><Td className="font-medium text-gray-900">{c.name}</Td><Td className="text-gray-500">{c.contact}</Td><Td className="text-gray-500"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                     c.level === 'Corporate' ? 'bg-cyan-100 text-cyan-800' :
                     c.level === 'Reseller' ? 'bg-teal-100 text-teal-800' :
                     c.level === 'Grosir' ? 'bg-yellow-100 text-yellow-800' :
@@ -518,17 +553,15 @@ const MasterData: React.FC<MasterDataProps> = ({
             </Table>
       );
       case 'suppliers':
-        const filteredSuppliers = suppliers.filter(s => s.name.toLowerCase().includes(lowerCaseQuery) || s.contactPerson.toLowerCase().includes(lowerCaseQuery));
         return (
             <Table headers={["Nama Supplier", "Narahubung", "Telepon", "Spesialisasi"]}>
-              {filteredSuppliers.map((s) => (<tr key={s.id}><Td className="font-medium text-gray-900">{s.name}</Td><Td className="text-gray-500">{s.contactPerson}</Td><Td className="text-gray-500">{s.phone}</Td><Td className="text-gray-500">{s.specialty}</Td></tr>))}
+              {(paginatedData as SupplierData[]).map((s) => (<tr key={s.id}><Td className="font-medium text-gray-900">{s.name}</Td><Td className="text-gray-500">{s.contactPerson}</Td><Td className="text-gray-500">{s.phone}</Td><Td className="text-gray-500">{s.specialty}</Td></tr>))}
             </Table>
         );
       case 'karyawan':
-        const filteredEmployees = employees.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.contact.toLowerCase().includes(lowerCaseQuery));
         return (
             <Table headers={["Nama Karyawan", "Kontak", "Devisi", "Tanggal Bergabung"]}>
-                {filteredEmployees.map((e) => (<tr key={e.id}>
+                {(paginatedData as EmployeeData[]).map((e) => (<tr key={e.id}>
                     <Td className="font-medium text-gray-900">{e.name}</Td>
                     <Td className="text-gray-500">{e.contact}</Td>
                     <Td className="text-gray-500">{e.division}</Td>
@@ -566,7 +599,7 @@ const MasterData: React.FC<MasterDataProps> = ({
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-md">
+    <div className="bg-white p-6 rounded-xl shadow-md flex flex-col">
       <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
         <h2 className="text-xl font-bold">Manajemen Data Master</h2>
         <div className="flex space-x-2">
@@ -592,9 +625,16 @@ const MasterData: React.FC<MasterDataProps> = ({
         />
       </div>
 
-      <div className="p-1 sm:p-4 bg-gray-50 rounded-lg min-h-[20rem]">
+      <div className="p-1 sm:p-4 bg-gray-50 rounded-lg min-h-[20rem] flex-1">
         {renderContent()}
       </div>
+
+      <Pagination
+        totalItems={totalItems}
+        itemsPerPage={ITEMS_PER_PAGE}
+        currentPage={currentPage}
+        onPageChange={setCurrentPage}
+      />
 
       <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} title={getModalTitle()}>
         {renderModalContent()}

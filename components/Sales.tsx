@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Cog6ToothIcon, PlusCircleIcon, TrashIcon, PencilIcon, PrinterIcon, PlayIcon, ClipboardIcon, ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon } from './Icons';
 import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData } from '../types';
@@ -126,19 +127,18 @@ const NotaSettingsModal: React.FC<{
           <div>
             <label htmlFor="nota-start" className="block text-sm font-medium text-gray-700">Mulai Nomor</label>
             <input
-              type="text"
+              type="number"
               id="nota-start"
               value={startNumber}
               onChange={(e) => setStartNumber(e.target.value)}
-              className="mt-1 w-full p-2 border border-gray-300 rounded-md bg-gray-100"
-              placeholder="e.g., 00001"
-              disabled
+              className="mt-1 w-full p-2 border border-gray-300 rounded-md"
+              placeholder="e.g., 124"
             />
-            <p className="text-xs text-gray-500 mt-1">Nomor awal akan berjalan otomatis dari database. Anda hanya dapat mengubah prefix.</p>
+            <p className="text-xs text-gray-500 mt-1">Masukkan nomor nota berikutnya yang akan digunakan.</p>
           </div>
           <div className="bg-gray-50 p-3 rounded-md">
             <p className="text-sm font-medium text-gray-600">Contoh nomor nota berikutnya:</p>
-            <p className="text-lg font-bold text-pink-600 mt-1">{prefix}{startNumber}</p>
+            <p className="text-lg font-bold text-pink-600 mt-1">{prefix}{startNumber.padStart(5, '0')}</p>
           </div>
         </div>
         <div className="mt-6 flex justify-end space-x-3 border-t pt-4">
@@ -169,7 +169,7 @@ interface SalesProps {
   boardData: KanbanData;
   noteCounter: number;
   notePrefix: string;
-  onUpdateNoteSettings: (prefix: string) => void;
+  onUpdateNoteSettings: (prefix: string, startNumber: number) => void;
 }
 
 const Sales: React.FC<SalesProps> = ({ 
@@ -184,9 +184,6 @@ const Sales: React.FC<SalesProps> = ({
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-
-  // New state for nota settings
-  const [noteStartNumberStr, setNoteStartNumberStr] = useState('00001'); // This determines padding
   const [isNotaSettingsOpen, setIsNotaSettingsOpen] = useState(false);
 
   const today = new Date().toISOString().substring(0, 10);
@@ -214,14 +211,23 @@ const Sales: React.FC<SalesProps> = ({
   const finishedInWarehouseCount = getItemsCount(boardData.warehouse);
   const deliveredCount = getItemsCount(boardData.delivered);
 
-  const handleSaveNotaSettings = (newPrefix: string) => {
-    onUpdateNoteSettings(newPrefix);
-    setIsNotaSettingsOpen(false);
+  const handleSaveNotaSettings = (newPrefix: string, newStartNumberStr: string) => {
+    const newStartNumber = parseInt(newStartNumberStr, 10);
+    if (isNaN(newStartNumber) || newStartNumber < 1) {
+        alert("Nomor awal harus berupa angka positif.");
+        return;
+    }
+
+    const confirmMessage = `Anda akan mengubah pengaturan nota menjadi:\nPrefix: ${newPrefix}\nNomor Selanjutnya: ${newStartNumber}\n\nPerubahan ini akan mempengaruhi penomoran nota selanjutnya dan tidak dapat diurungkan. Lanjutkan?`;
+    
+    if (window.confirm(confirmMessage)) {
+        onUpdateNoteSettings(newPrefix, newStartNumber);
+        setIsNotaSettingsOpen(false);
+    }
   };
 
   const getNextNotaNumber = () => {
-    const paddingLength = noteStartNumberStr.length > 0 ? noteStartNumberStr.length : 5;
-    return `${notePrefix}${noteCounter.toString().padStart(paddingLength, '0')}`;
+    return `${notePrefix}${noteCounter.toString().padStart(5, '0')}`;
   };
 
   const filteredOrders = useMemo(() => {
@@ -244,6 +250,12 @@ const Sales: React.FC<SalesProps> = ({
         setTotalPrice(0);
         return;
       }
+
+      const ROUNDING_AMOUNT = 500;
+      const roundUpToNearest = (num: number, nearest: number) => {
+          if (nearest <= 0) return num;
+          return Math.ceil(num / nearest) * nearest;
+      };
       
       const currentCustomerData = customers.find(c => c.name === customer);
       const customerLevel = currentCustomerData ? currentCustomerData.level : 'End Customer';
@@ -271,9 +283,12 @@ const Sales: React.FC<SalesProps> = ({
             priceMultiplier = length * width;
         }
         
-        total += (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+        const baseItemPrice = materialPrice + finishingPrice;
+        total += (baseItemPrice * priceMultiplier) * item.qty;
       });
-      setTotalPrice(total);
+
+      const roundedTotal = roundUpToNearest(total, ROUNDING_AMOUNT);
+      setTotalPrice(roundedTotal);
     };
     calculateTotal();
   }, [orderItems, customer, products, finishings, customers, categories]);
@@ -555,7 +570,7 @@ const Sales: React.FC<SalesProps> = ({
         onClose={() => setIsNotaSettingsOpen(false)}
         onSave={handleSaveNotaSettings}
         currentPrefix={notePrefix}
-        currentStartNumber={getNextNotaNumber().replace(notePrefix, '')}
+        currentStartNumber={noteCounter.toString()}
       />
       {modalData && (
           <OrderListModal 

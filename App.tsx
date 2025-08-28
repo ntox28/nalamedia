@@ -454,9 +454,19 @@ const App: React.FC = () => {
       // State updates will be handled by real-time subscription.
   }, []);
 
-  const handleUpdateNoteSettings = useCallback(async (prefix: string) => {
-      const { error } = await supabase.from('app_sequences').update({ prefix }).eq('name', 'order_nota');
-      if (error) { alert(`Gagal update prefix: ${error.message}`); } else { setNotePrefix(prefix); }
+  const handleUpdateNoteSettings = useCallback(async (prefix: string, startNumber: number) => {
+    const { error } = await supabase
+        .from('app_sequences')
+        .update({ prefix, current_value: startNumber })
+        .eq('name', 'order_nota');
+        
+    if (error) { 
+        alert(`Gagal update pengaturan nota: ${error.message}`); 
+    } else { 
+        setNotePrefix(prefix); 
+        setNoteCounter(startNumber);
+        alert('Pengaturan nomor nota berhasil diperbarui.');
+    }
   }, []);
   
   const handleProcessPayment = useCallback(async (orderId: string, paymentDetails: Payment, newDiscount?: number) => {
@@ -626,12 +636,12 @@ const App: React.FC = () => {
       case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} />;
       case 'receivables': return <Receivables receivables={receivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} />;
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
-      case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} />;
+      case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
       case 'production': return <Production boardData={boardData} allOrders={allOrders} products={products} categories={categories} onProductionMove={handleProductionMove} onCancelQueue={handleCancelQueue} />;
       case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onDeleteAttendance={handleDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} />;
       case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} onAddProduct={handleAddProduct} onAddCategory={handleAddCategory} onAddFinishing={handleAddFinishing} onAddCustomer={handleAddCustomer} onAddSupplier={handleAddSupplier} onAddEmployee={handleAddEmployee} />;
       case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
-      case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyIncome={legacyIncome} legacyExpense={legacyExpense} legacyReceivables={legacyReceivables} assets={assets} debts={debts} onSetLegacyIncome={handleSetLegacyIncome} onSetLegacyExpense={handleSetLegacyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onSettleLegacyReceivable={handleSettleLegacyReceivable} onAddAsset={handleAddAsset} onAddDebt={handleAddDebt} />;
+      case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyIncome={legacyIncome} legacyExpense={legacyExpense} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onSetLegacyIncome={handleSetLegacyIncome} onSetLegacyExpense={handleSetLegacyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onSettleLegacyReceivable={handleSettleLegacyReceivable} onAddAsset={handleAddAsset} onAddDebt={handleAddDebt} />;
       case 'settings': return <Settings users={users} menuPermissions={menuPermissions} currentUser={profile} currentUserLevel={profile!.level} notificationSettings={notificationSettings} storeInfo={storeInfo} onAddUser={handleAddProfile} onUpdateUser={handleUpdateUser} onUpdateMenuPermissions={handleUpdateMenuPermissions} onUpdateNotificationSettings={handleUpdateNotificationSettings} onUpdateStoreInfo={handleUpdateStoreInfo} />;
       default: return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} />;
     }

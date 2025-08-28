@@ -1,7 +1,10 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { type KanbanData, type CardData, type ProductionStatus, type SavedOrder, type ProductData, type CategoryData } from '../types';
 import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon } from './Icons';
+import Pagination from './Pagination';
+
+const ITEMS_PER_PAGE = 20;
 
 interface StatCardProps {
   icon: React.ReactElement<{ className?: string }>;
@@ -89,6 +92,11 @@ const Production: React.FC<ProductionProps> = ({ boardData, allOrders, products,
   const [activeTab, setActiveTab] = useState<ProductionStatus>('queue');
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchQuery]);
 
   const getItemsCount = (cards: CardData[]): number => {
       return cards.reduce((sum, card) => {
@@ -122,6 +130,11 @@ const Production: React.FC<ProductionProps> = ({ boardData, allOrders, products,
         );
     });
   }, [boardData, activeTab, searchQuery, allOrders]);
+
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredOrdersInTab.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredOrdersInTab, currentPage]);
 
   const renderActionButtons = (order: CardData, status: ProductionStatus) => {
     switch (status) {
@@ -271,8 +284,8 @@ const Production: React.FC<ProductionProps> = ({ boardData, allOrders, products,
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredOrdersInTab.length > 0 ? (
-                  filteredOrdersInTab.flatMap(card => {
+                {paginatedOrders.length > 0 ? (
+                  paginatedOrders.flatMap(card => {
                     const fullOrder = allOrders.find(o => o.id === card.id);
                     if (!fullOrder) return []; // Should not happen
                     
@@ -324,6 +337,12 @@ const Production: React.FC<ProductionProps> = ({ boardData, allOrders, products,
               </tbody>
             </table>
           </div>
+           <Pagination
+            totalItems={filteredOrdersInTab.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            currentPage={currentPage}
+            onPageChange={setCurrentPage}
+          />
         </div>
       </div>
     </>

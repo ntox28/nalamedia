@@ -1,7 +1,11 @@
 
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { type SalaryData, type EmployeeData, type AttendanceData, type PayrollRecord, type Bonus, type Deduction } from '../types';
 import { TrashIcon, PencilIcon, PrinterIcon, FilterIcon } from './Icons';
+import Pagination from './Pagination';
+
+const ITEMS_PER_PAGE = 20;
 
 type PayrollTab = 'attendance' | 'summary';
 
@@ -209,12 +213,17 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
     const [filterStartDate, setFilterStartDate] = useState('');
     const [filterEndDate, setFilterEndDate] = useState('');
     const [summaryModal, setSummaryModal] = useState<{ isOpen: boolean; data: any | null; isEditing: boolean }>({ isOpen: false, data: null, isEditing: false });
+    const [currentPage, setCurrentPage] = useState(1);
 
     useEffect(() => {
         if (accessibleTabs.length > 0 && !accessibleTabs.some(t => t.key === activeTab)) {
             setActiveTab(accessibleTabs[0].key);
         }
     }, [accessibleTabs, activeTab]);
+    
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [activeTab, filterEmployeeId, filterStartDate, filterEndDate]);
 
     const employeesWithSalary = useMemo(() => {
         return salaries.map(salary => {
@@ -577,6 +586,22 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
 
     const sortedAttendance = useMemo(() => [...availableAttendance].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [availableAttendance]);
     
+    const filteredPayrollRecords = useMemo(() => {
+        return payrollRecords
+            .filter(record => {
+                if (filterEmployeeId && record.employeeId !== Number(filterEmployeeId)) return false;
+                if (filterStartDate && record.endDate < filterStartDate) return false;
+                if (filterEndDate && record.startDate > filterEndDate) return false;
+                return true;
+            })
+            .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime());
+    }, [payrollRecords, filterEmployeeId, filterStartDate, filterEndDate]);
+
+    const paginatedPayrollRecords = useMemo(() => {
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        return filteredPayrollRecords.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [filteredPayrollRecords, currentPage]);
+    
     // UI RENDER METHODS
     const TabButton: React.FC<{ label: string; tabKey: string; }> = ({ label, tabKey }) => (
         <button onClick={() => setActiveTab(tabKey)} className={`${ activeTab === tabKey ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}>{label}</button>
@@ -593,7 +618,13 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
         <div>
             <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-semibold text-gray-700">Ringkasan Gaji Karyawan</h3><button onClick={() => setIsFilterVisible(!isFilterVisible)} className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"><FilterIcon className="h-4 w-4" /><span>{isFilterVisible ? 'Sembunyikan' : 'Tampilkan'} Filter</span></button></div>
             {isFilterVisible && (<div className="bg-gray-50 p-4 rounded-lg mb-6 border"><div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"><select value={filterEmployeeId} onChange={e => setFilterEmployeeId(e.target.value)} className="p-2 border rounded-md bg-white text-sm"><option value="">Pilih Karyawan</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select><input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" /><input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" /><button onClick={handleAmbilAbsen} className="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 w-full">Ambil Absen</button></div></div>)}
-            <div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Karyawan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Devisi</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Periode</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Total Gaji</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{payrollRecords.map(record => { const emp = employees.find(e => e.id === record.employeeId); return (<tr key={record.id}><td className="py-4 px-4 font-medium">{emp?.name || 'N/A'}</td><td className="py-4 px-4">{emp?.division || 'N/A'}</td><td className="py-4 px-4 text-sm">{`${new Date(record.startDate).toLocaleDateString('id-ID')} - ${new Date(record.endDate).toLocaleDateString('id-ID')}`}</td><td className="py-4 px-4 font-semibold">{formatCurrency(record.totalSalary)}</td><td className="py-4 px-4 space-x-2"><button onClick={() => handleEditPayroll(record)} className="p-1.5 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4"/></button><button onClick={() => handlePrintPayslip(record)} className="p-1.5 text-gray-500 hover:text-gray-800"><PrinterIcon className="h-4 w-4"/></button><button onClick={() => onRevertPayroll(record.id)} className="p-1.5 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4"/></button></td></tr>);})}</tbody></table>{payrollRecords.length === 0 && (<div className="text-center py-16 text-gray-500"><p>Belum ada data gaji yang diproses.</p></div>)}</div>
+            <div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Karyawan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Devisi</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Periode</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Total Gaji</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{paginatedPayrollRecords.map(record => { const emp = employees.find(e => e.id === record.employeeId); return (<tr key={record.id}><td className="py-4 px-4 font-medium">{emp?.name || 'N/A'}</td><td className="py-4 px-4">{emp?.division || 'N/A'}</td><td className="py-4 px-4 text-sm">{`${new Date(record.startDate).toLocaleDateString('id-ID')} - ${new Date(record.endDate).toLocaleDateString('id-ID')}`}</td><td className="py-4 px-4 font-semibold">{formatCurrency(record.totalSalary)}</td><td className="py-4 px-4 space-x-2"><button onClick={() => handleEditPayroll(record)} className="p-1.5 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4"/></button><button onClick={() => handlePrintPayslip(record)} className="p-1.5 text-gray-500 hover:text-gray-800"><PrinterIcon className="h-4 w-4"/></button><button onClick={() => onRevertPayroll(record.id)} className="p-1.5 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4"/></button></td></tr>);})}</tbody></table>{filteredPayrollRecords.length === 0 && (<div className="text-center py-16 text-gray-500"><p>Belum ada data gaji yang diproses.</p></div>)}</div>
+             <Pagination
+                totalItems={filteredPayrollRecords.length}
+                itemsPerPage={ITEMS_PER_PAGE}
+                currentPage={currentPage}
+                onPageChange={setCurrentPage}
+            />
             {summaryModal.isOpen && summaryModal.data && (
                 <SummaryEditModal
                     employee={employees.find(e => e.id === summaryModal.data.employeeId)!}

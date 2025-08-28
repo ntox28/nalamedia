@@ -1,6 +1,11 @@
+
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem } from '../types';
 import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon } from './Icons';
+import Pagination from './Pagination';
+
+const ITEMS_PER_PAGE = 20;
 
 // --- START: Reusable Components ---
 
@@ -143,7 +148,8 @@ const PaymentModal: React.FC<{
         priceMultiplier = length * width;
     }
     
-    return (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+    const baseItemPrice = materialPrice + finishingPrice;
+    return (baseItemPrice * priceMultiplier) * item.qty;
   };
 
   const handleProcessPayment = () => {
@@ -469,6 +475,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isBulkPayModalOpen, setBulkPayModalOpen] = useState(false);
   const [isInitialCashModalOpen, setInitialCashModalOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   
   // Filter states
   const [filterSearch, setFilterSearch] = useState('');
@@ -476,6 +483,10 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [filterStatus, setFilterStatus] = useState('');
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
 
   const uniqueCustomers = useMemo(() => {
     const customers = new Set(receivables.map(r => r.customer));
@@ -512,6 +523,11 @@ const Receivables: React.FC<ReceivablesProps> = ({
     }).sort((a, b) => b.id.localeCompare(a.id));
   }, [receivables, allOrders, filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
   
+  const paginatedReceivables = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredReceivables.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredReceivables, currentPage]);
+
   const unpaidFilteredReceivables = useMemo(() => {
     return filteredReceivables.filter(r => r.paymentStatus === 'Belum Lunas');
   }, [filteredReceivables]);
@@ -633,7 +649,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
             priceMultiplier = length * width;
         }
         
-        const total = (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+        const baseItemPrice = materialPrice + finishingPrice;
+        const total = (baseItemPrice * priceMultiplier) * item.qty;
         const perUnit = item.qty > 0 ? total / item.qty : 0;
         return { total, perUnit };
     };
@@ -762,7 +779,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
     }
   };
   
-  const handlePrintDotMatrixNota = (order: ReceivableItem) => {
+    const handlePrintDotMatrixNota = (order: ReceivableItem) => {
     const fullOrder = allOrders.find(o => o.id === order.id);
     if (!fullOrder) {
         alert("Detail order tidak ditemukan!");
@@ -796,7 +813,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
             priceMultiplier = length * width;
         }
         
-        return (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+        const baseItemPrice = materialPrice + finishingPrice;
+        return (baseItemPrice * priceMultiplier) * item.qty;
     };
 
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
@@ -1157,7 +1175,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
             priceMultiplier = length * width;
         }
         
-        return (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+        const baseItemPrice = materialPrice + finishingPrice;
+        return (baseItemPrice * priceMultiplier) * item.qty;
     };
 
     const storeInfo = `*Nala Media Digital Printing*\nJl. Prof. Moh. Yamin, Cerbonan, Karanganyar\n(Timur Stadion 45)\nTelp: 0813-9872-7722`;
@@ -1245,11 +1264,16 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
         const category = categories.find(c => c.name === product.category);
         const isAreaBased = category?.unitType === 'Per Luas';
-
-        const hargaSatuan = getPriceForCustomer(product, customer.level);
-        const area = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
-        const hargaItem = hargaSatuan * area;
-        const jumlah = hargaItem * item.qty;
+        
+        const finishingInfo = finishings.find(f => f.name === item.finishing);
+        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
+        
+        const materialPrice = getPriceForCustomer(product, customer.level);
+        const baseItemPricePerUnit = materialPrice + finishingPrice;
+        
+        const priceMultiplier = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
+        const hargaSatuanFinal = baseItemPricePerUnit * priceMultiplier;
+        const jumlah = hargaSatuanFinal * item.qty;
 
         return `
             <tr>
@@ -1260,7 +1284,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 </td>
                 <td class="p-3 text-center text-gray-600">${isAreaBased ? `${item.length}x${item.width} m` : '-'}</td>
                 <td class="p-3 text-center text-gray-600">${item.qty}</td>
-                <td class="p-3 text-right text-gray-600">${formatCurrency(hargaItem)}</td>
+                <td class="p-3 text-right text-gray-600">${formatCurrency(hargaSatuanFinal)}</td>
                 <td class="p-3 text-right font-medium text-gray-800">${formatCurrency(jumlah)}</td>
             </tr>
         `;
@@ -1550,7 +1574,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredReceivables.length > 0 ? filteredReceivables.map(item => (
+              {paginatedReceivables.length > 0 ? paginatedReceivables.map(item => (
                 <tr key={item.id} className="hover:bg-gray-50">
                   <td className="py-4 px-4 whitespace-nowrap font-medium text-gray-800">{item.id}</td>
                   <td className="py-4 px-4 whitespace-nowrap">{item.customer}</td>
@@ -1609,6 +1633,12 @@ const Receivables: React.FC<ReceivablesProps> = ({
             </tbody>
           </table>
         </div>
+        <Pagination
+          totalItems={filteredReceivables.length}
+          itemsPerPage={ITEMS_PER_PAGE}
+          currentPage={currentPage}
+          onPageChange={setCurrentPage}
+        />
       </div>
       {selectedOrder && (
         <PaymentModal 
