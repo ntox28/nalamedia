@@ -654,12 +654,18 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const perUnit = item.qty > 0 ? total / item.qty : 0;
         return { total, perUnit };
     };
+    
+    const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer).total, 0);
+    const roundingDifference = subtotal - unroundedTotal;
 
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
         const category = categories.find(c => c.name === product?.category);
         const isArea = category?.unitType === 'Per Luas';
         const prices = calculateItemPrice(item, order.customer);
+        
+        const isLastItem = index === fullOrder.orderItems.length - 1;
+        const displayTotal = isLastItem ? prices.total + roundingDifference : prices.total;
 
         const detailsParts = [];
         if (isArea && parseFloat(item.length) > 0 && parseFloat(item.width) > 0) {
@@ -673,7 +679,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         return `
             <div style="margin-bottom: 4px;">
                 <div class="bold">${index + 1}. ${item.description || product?.name || 'N/A'}</div>
-                <div class="details-line">&nbsp;&nbsp;&nbsp;${detailsLine} = ${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(prices.total)}</div>
+                <div class="details-line">&nbsp;&nbsp;&nbsp;${detailsLine} = ${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(displayTotal)}</div>
 
             </div>
         `;
@@ -816,12 +822,20 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const baseItemPrice = materialPrice + finishingPrice;
         return (baseItemPrice * priceMultiplier) * item.qty;
     };
+    
+    const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer), 0);
+    const roundingDifference = order.amount - unroundedTotal;
 
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
         const category = categories.find(c => c.name === product?.category);
         const isArea = category?.unitType === 'Per Luas';
-        const itemTotal = calculateItemPrice(item, order.customer);
+        
+        let itemTotal = calculateItemPrice(item, order.customer);
+        const isLastItem = index === fullOrder.orderItems.length - 1;
+        if (isLastItem) {
+            itemTotal += roundingDifference;
+        }
 
         return `
             <tr>
@@ -1178,6 +1192,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const baseItemPrice = materialPrice + finishingPrice;
         return (baseItemPrice * priceMultiplier) * item.qty;
     };
+    
+    const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer), 0);
+    const roundingDifference = order.amount - unroundedTotal;
 
     const storeInfo = `*Nala Media Digital Printing*\nJl. Prof. Moh. Yamin, Cerbonan, Karanganyar\n(Timur Stadion 45)\nTelp: 0813-9872-7722`;
     const divider = '--------------------------------';
@@ -1189,11 +1206,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
         `Pelanggan: ${order.customer}`
     ].join('\n');
 
-    const itemsInfo = fullOrder.orderItems.map(item => {
+    const itemsInfo = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
         const category = categories.find(c => c.name === product?.category);
         const isArea = category?.unitType === 'Per Luas';
-        const itemTotal = calculateItemPrice(item, order.customer);
+        
+        let itemTotal = calculateItemPrice(item, order.customer);
+        const isLastItem = index === fullOrder.orderItems.length - 1;
+        if (isLastItem) {
+            itemTotal += roundingDifference;
+        }
+
         const pricePerUnit = item.qty > 0 ? itemTotal / item.qty : 0;
 
         const description = item.description || product?.name || 'Item';
@@ -1258,6 +1281,23 @@ const Receivables: React.FC<ReceivablesProps> = ({
       { id: 3, name: 'BPD JATENG', account_number: '3142-069325' }
     ];
 
+    const unroundedTotal = fullOrder.orderItems.reduce((sum, item) => {
+        const product = products.find(p => p.id === item.productId);
+        if (!product || !customer) return sum;
+
+        const category = categories.find(c => c.name === product.category);
+        const isAreaBased = category?.unitType === 'Per Luas';
+        const finishingInfo = finishings.find(f => f.name === item.finishing);
+        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
+        const materialPrice = getPriceForCustomer(product, customer.level);
+        const baseItemPricePerUnit = materialPrice + finishingPrice;
+        const priceMultiplier = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
+        const hargaSatuanFinal = baseItemPricePerUnit * priceMultiplier;
+        const jumlah = hargaSatuanFinal * item.qty;
+        return sum + jumlah;
+    }, 0);
+    const roundingDifference = totalTagihan - unroundedTotal;
+
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
         if (!product || !customer) return '';
@@ -1274,6 +1314,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const priceMultiplier = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
         const hargaSatuanFinal = baseItemPricePerUnit * priceMultiplier;
         const jumlah = hargaSatuanFinal * item.qty;
+        
+        const isLastItem = index === fullOrder.orderItems.length - 1;
+        const displayJumlah = isLastItem ? jumlah + roundingDifference : jumlah;
 
         return `
             <tr>
@@ -1285,7 +1328,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 <td class="p-3 text-center text-gray-600">${isAreaBased ? `${item.length}x${item.width} m` : '-'}</td>
                 <td class="p-3 text-center text-gray-600">${item.qty}</td>
                 <td class="p-3 text-right text-gray-600">${formatCurrency(hargaSatuanFinal)}</td>
-                <td class="p-3 text-right font-medium text-gray-800">${formatCurrency(jumlah)}</td>
+                <td class="p-3 text-right font-medium text-gray-800">${formatCurrency(displayJumlah)}</td>
             </tr>
         `;
     }).join('');
