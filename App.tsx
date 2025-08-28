@@ -288,6 +288,32 @@ const App: React.FC = () => {
     };
   }, [fetchAllData, clearAllData]);
 
+  // --- Real-time Subscription ---
+  useEffect(() => {
+    if (!profile) return;
+
+    console.log("Setting up real-time subscription...");
+
+    const channel = supabase
+        .channel('public-changes')
+        .on(
+            'postgres_changes',
+            { event: '*', schema: 'public' },
+            (payload) => {
+                console.log('Real-time change received!', payload);
+                // The simplest and most robust way to ensure all derived state
+                // is recalculated correctly is to re-fetch all data.
+                fetchAllData();
+            }
+        )
+        .subscribe();
+
+    return () => {
+        console.log("Removing real-time subscription.");
+        supabase.removeChannel(channel);
+    };
+  }, [profile, fetchAllData]);
+
   // --- Data Handlers ---
   const handleAddProfile = useCallback(async (newProfileData: { name: string; level: UserLevel }) => {
     const tempUuid = crypto.randomUUID();
@@ -400,6 +426,7 @@ const App: React.FC = () => {
       const { error: seqError } = await supabase.from('app_sequences').update({ current_value: noteCounter + 1 }).eq('name', 'order_nota');
       if (seqError) console.error('Failed to update sequence');
 
+      // State will be updated by real-time subscription, but local update provides instant feedback.
       setAllOrders(prev => [...prev, data]);
       setUnprocessedOrders(prev => [...prev, data]);
       setNoteCounter(prev => prev + 1);
@@ -418,16 +445,13 @@ const App: React.FC = () => {
       const newReceivable: Omit<ReceivableItem, 'payments'> = { id: order.id, customer: order.customer, amount: order.totalPrice, due: new Date().toISOString().substring(0, 10), paymentStatus: 'Belum Lunas', productionStatus: 'Dalam Antrian' };
       const { data, error } = await supabase.from('receivables').insert(newReceivable).select().single();
       if (error || !data) { alert(`Gagal proses order: ${error?.message}`); return; }
-      setReceivables(prev => [...prev, data]);
-      setUnprocessedOrders(prev => prev.filter(o => o.id !== orderId));
-      setBoardData(prev => ({ ...prev, queue: [...prev.queue, { id: data.id, customer: data.customer, details: order.details }] }));
+      // State updates will be handled by real-time subscription.
   }, [allOrders]);
 
   const handleDeleteOrder = useCallback(async (orderId: string) => {
       const { error } = await supabase.from('orders').delete().eq('id', orderId);
       if (error) { alert(`Gagal hapus order: ${error.message}`); return; }
-      setAllOrders(prev => prev.filter(o => o.id !== orderId));
-      setUnprocessedOrders(prev => prev.filter(o => o.id !== orderId));
+      // State updates will be handled by real-time subscription.
   }, []);
 
   const handleUpdateNoteSettings = useCallback(async (prefix: string) => {
@@ -462,7 +486,7 @@ const App: React.FC = () => {
     const { data, error } = await supabase.from('receivables').update(updatePayload).eq('id', orderId).select().single();
     
     if (error || !data) { alert(`Gagal proses bayar: ${error?.message}`); return; }
-    setReceivables(prev => prev.map(r => r.id === orderId ? data : r));
+    // State updates will be handled by real-time subscription.
   }, [receivables]);
 
   const handleBulkProcessPayment = useCallback(async (orderIds: string[], paymentDate: string, paymentSource: string) => {
@@ -478,27 +502,27 @@ const App: React.FC = () => {
     }).filter(Boolean);
 
     await Promise.all(updates);
-    fetchAllData(); // Re-fetch all data to ensure consistency
-  }, [receivables, fetchAllData]);
+    // Real-time will handle the update, no need to fetchAllData here.
+  }, [receivables]);
 
   const handleAddExpense = useCallback(async (newExpense: Omit<ExpenseItem, 'id'>) => {
     const { data, error } = await supabase.from('expenses').insert(newExpense).select().single();
     if (error || !data) { alert(`Gagal tambah pengeluaran: ${error?.message}`); return; }
-    setExpenses(prev => [...prev, data]);
+    // State updates will be handled by real-time subscription.
   }, []);
   
   const handleProductionMove = useCallback(async (orderId: string, from: ProductionStatus, to: ProductionStatus) => {
     const statusMap: Record<ProductionStatus, ProductionStatusDisplay> = { queue: 'Dalam Antrian', printing: 'Proses Cetak', warehouse: 'Siap Ambil', delivered: 'Telah Dikirim' };
     const { data, error } = await supabase.from('receivables').update({ productionStatus: statusMap[to] }).eq('id', orderId).select().single();
     if (error || !data) { alert(`Gagal pindah status: ${error.message}`); return; }
-    await fetchAllData(); // Easiest way to keep Kanban board in sync
-  }, [fetchAllData]);
+    // State updates will be handled by real-time subscription.
+  }, []);
 
   const handleCancelQueue = useCallback(async (orderId: string) => {
     const { error } = await supabase.from('receivables').delete().eq('id', orderId);
     if (error) { alert(`Gagal batal antrian: ${error.message}`); return; }
-    await fetchAllData();
-  }, [fetchAllData]);
+    // State updates will be handled by real-time subscription.
+  }, []);
 
   const handleUseStock = useCallback(async (itemId: number, amountUsed: number, usageDate: string) => {
       const item = inventory.find(i => i.id === itemId);
@@ -508,13 +532,13 @@ const App: React.FC = () => {
       const updatedHistory = [...(item.usageHistory || []), newHistory];
       const { data, error } = await supabase.from('inventory').update({ stock: newStock, usageHistory: updatedHistory }).eq('id', itemId).select().single();
       if (error || !data) { alert(`Gagal update stok: ${error.message}`); return; }
-      setInventory(prev => prev.map(i => i.id === itemId ? data : i));
+      // State updates will be handled by real-time subscription.
   }, [inventory]);
 
     const genericAddHandler = useCallback(async <T extends {id: number}>(table: string, newItem: Omit<T, 'id'>, setter: React.Dispatch<React.SetStateAction<T[]>>) => {
         const { data, error } = await supabase.from(table).insert(newItem).select().single();
         if (error || !data) { alert(`Gagal menambah data: ${error.message}`); return; }
-        setter(prev => [...prev, data]);
+        // State updates will be handled by real-time subscription.
     }, []);
     
   const handleAddProduct = (p: Omit<ProductData, 'id'>) => genericAddHandler('products', p, setProducts);
@@ -527,13 +551,13 @@ const App: React.FC = () => {
   const genericUpdateHandler = useCallback(async <T extends {id: number}>(table: string, updatedItem: T, setter: React.Dispatch<React.SetStateAction<T[]>>) => {
       const { data, error } = await supabase.from(table).update(updatedItem).eq('id', updatedItem.id).select().single();
       if (error || !data) { alert(`Gagal update data: ${error.message}`); return; }
-      setter(prev => prev.map(item => item.id === data.id ? data : item));
+      // State updates will be handled by real-time subscription.
   }, []);
 
   const genericDeleteHandler = useCallback(async (table: string, id: number, setter: React.Dispatch<React.SetStateAction<{id: number}[]>>) => {
       const { error } = await supabase.from(table).delete().eq('id', id);
       if (error) { alert(`Gagal hapus data: ${error.message}`); return; }
-      setter(prev => prev.filter(item => item.id !== id));
+      // State updates will be handled by real-time subscription.
   }, []);
 
   const handleUpdateProduct = (p: ProductData) => genericUpdateHandler('products', p, setProducts);
@@ -565,7 +589,7 @@ const App: React.FC = () => {
       const newRecord: Omit<PayrollRecord, 'id'> = { employeeId, startDate, endDate, baseSalary, overtimePay, bonuses, deductions, totalSalary, processedAttendance };
       const { data, error } = await supabase.from('payroll_records').insert(newRecord).select().single();
       if (error || !data) { alert(`Gagal proses gaji: ${error.message}`); return; }
-      setPayrollRecords(prev => [...prev, data]);
+      // State updates will be handled by real-time subscription.
   }, []);
   
   const handleUpdatePayroll = (p: PayrollRecord) => genericUpdateHandler('payroll_records', p, setPayrollRecords);
