@@ -659,8 +659,8 @@ const Sales: React.FC<SalesProps> = ({
                   </div>
                   <div><label className="block text-sm font-medium">Deskripsi Pesanan</label><textarea value={item.description} onChange={(e) => handleItemChange(item.id, 'description', e.target.value)} rows={2} className="mt-1 w-full p-2 border rounded-md" placeholder="e.g., Cetak full color..." required></textarea></div>
                   <div className="grid grid-cols-3 gap-4">
-                    <div><label className="block text-sm font-medium">Panjang (m)</label><input type="number" value={item.length} onChange={(e) => handleItemChange(item.id, 'length', e.target.value)} placeholder="-" className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.1" min="0" disabled={!isAreaBased}/></div>
-                    <div><label className="block text-sm font-medium">Lebar (m)</label><input type="number" value={item.width} onChange={(e) => handleItemChange(item.id, 'width', e.target.value)} placeholder="-" className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.1" min="0" disabled={!isAreaBased}/></div>
+                    <div><label className="block text-sm font-medium">Panjang (m)</label><input type="number" value={item.length} onChange={(e) => handleItemChange(item.id, 'length', e.target.value)} placeholder="-" className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.01" min="0" disabled={!isAreaBased}/></div>
+                    <div><label className="block text-sm font-medium">Lebar (m)</label><input type="number" value={item.width} onChange={(e) => handleItemChange(item.id, 'width', e.target.value)} placeholder="-" className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.01" min="0" disabled={!isAreaBased}/></div>
                     <div><label className="block text-sm font-medium">Qty</label><input type="number" value={item.qty} onChange={(e) => handleItemChange(item.id, 'qty', parseInt(e.target.value, 10) || 1)} className="mt-1 w-full p-2 border rounded-md" min="1" /></div>
                   </div>
                 </div>
