@@ -328,7 +328,8 @@ const Reports: React.FC<ReportsProps> = ({
                     const width = parseFloat(item.width) || 0;
                     priceMultiplier = length * width;
                 }
-                return (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+                const baseItemPrice = materialPrice + finishingPrice;
+                return (baseItemPrice * priceMultiplier) * item.qty;
             };
 
             let rowNum = 1;
@@ -561,7 +562,8 @@ const Reports: React.FC<ReportsProps> = ({
                 const width = parseFloat(item.width) || 0;
                 priceMultiplier = length * width;
             }
-            return (priceMultiplier * materialPrice + finishingPrice) * item.qty;
+            const baseItemPrice = materialPrice + finishingPrice;
+            return (baseItemPrice * priceMultiplier) * item.qty;
         };
 
         let rowNum = 1;

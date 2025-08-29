@@ -682,9 +682,15 @@ const Receivables: React.FC<ReceivablesProps> = ({
         
         const detailsLine = detailsParts.join(' // ');
 
+        const materialAndFinishing = [
+            product?.name || 'N/A',
+            (item.finishing && item.finishing !== 'Tanpa Finishing') ? item.finishing : ''
+        ].filter(Boolean).join(' - ');
+
         return `
             <div style="margin-bottom: 4px;">
                 <div class="bold">${index + 1}. ${item.description || product?.name || 'N/A'}</div>
+                <div class="details-line">&nbsp;&nbsp;&nbsp;${materialAndFinishing}</div>
                 <div class="details-line">&nbsp;&nbsp;&nbsp;${detailsLine} = ${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(displayTotal)}</div>
 
             </div>
@@ -843,11 +849,16 @@ const Receivables: React.FC<ReceivablesProps> = ({
             itemTotal += roundingDifference;
         }
 
+        const materialAndFinishing = [
+            product?.name || 'N/A',
+            (item.finishing && item.finishing !== 'Tanpa Finishing') ? item.finishing : ''
+        ].filter(Boolean).join(' - ');
+
         return `
             <tr>
                 <td style="text-align: center;">${index + 1}</td>
                 <td>${item.description || '-'}</td>
-                <td>${product?.name || 'N/A'}</td>
+                <td>${materialAndFinishing}</td>
                 <td>${isArea ? `${item.length}x${item.width}` : '-'}</td>
                 <td style="text-align: center;">${item.qty}</td>
                 <td class="currency">${new Intl.NumberFormat('id-ID').format(itemTotal)}</td>
@@ -1318,18 +1329,24 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const baseItemPricePerUnit = materialPrice + finishingPrice;
         
         const priceMultiplier = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
-        const hargaSatuanFinal = baseItemPricePerUnit * priceMultiplier;
-        const jumlah = hargaSatuanFinal * item.qty;
+        const unroundedItemTotal = (baseItemPricePerUnit * priceMultiplier) * item.qty;
         
         const isLastItem = index === fullOrder.orderItems.length - 1;
-        const displayJumlah = isLastItem ? jumlah + roundingDifference : jumlah;
+        const displayJumlah = isLastItem ? unroundedItemTotal + roundingDifference : unroundedItemTotal;
+        
+        const hargaSatuanFinal = item.qty > 0 ? displayJumlah / item.qty : 0;
+
+        const materialAndFinishing = [
+            product.name,
+            (item.finishing && item.finishing !== 'Tanpa Finishing') ? item.finishing : ''
+        ].filter(Boolean).join(' - ');
 
         return `
             <tr>
                 <td class="p-3 text-center text-gray-600">${index + 1}</td>
                 <td class="p-3">
                     <p class="font-medium text-gray-800">${item.description || product.name}</p>
-                    <p class="text-xs text-gray-500">${product.name}</p>
+                    <p class="text-xs text-gray-500">${materialAndFinishing}</p>
                 </td>
                 <td class="p-3 text-center text-gray-600">${isAreaBased ? `${item.length}x${item.width} m` : '-'}</td>
                 <td class="p-3 text-center text-gray-600">${item.qty}</td>
