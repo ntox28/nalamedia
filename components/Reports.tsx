@@ -565,10 +565,19 @@ const Reports: React.FC<ReportsProps> = ({
         };
 
         let rowNum = 1;
-        return filteredSalesData.flatMap(order => 
-            order.orderItems.map(item => {
+        return filteredSalesData.flatMap(order => {
+            const unroundedOrderTotal = order.orderItems.reduce((sum, item) => sum + calculateItemPrice(item, order.customer), 0);
+            const roundingDifference = order.totalPrice - unroundedOrderTotal;
+
+            return order.orderItems.map((item, index) => {
                 const product = products.find(p => p.id === item.productId);
                 const receivable = receivables.find(r => r.id === order.id);
+                let itemTotal = calculateItemPrice(item, order.customer);
+
+                if (index === order.orderItems.length - 1) {
+                    itemTotal += roundingDifference;
+                }
+                
                 return {
                     key: `${order.id}-${item.id}`,
                     no: rowNum++,
@@ -580,11 +589,11 @@ const Reports: React.FC<ReportsProps> = ({
                     p: item.length,
                     l: item.width,
                     qty: item.qty,
-                    total: calculateItemPrice(item, order.customer),
+                    total: itemTotal,
                     status: receivable ? receivable.paymentStatus : 'Belum Diproses'
                 };
             })
-        );
+        });
     }, [filteredSalesData, products, categories, customers, finishings, receivables]);
     
     const paginatedSalesData = useMemo(() => {

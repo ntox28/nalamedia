@@ -175,6 +175,9 @@ const PaymentModal: React.FC<{
       }, finalDiscount);
   };
 
+  const unroundedTotal = fullOrder?.orderItems.reduce((sum, item) => sum + calculateItemPrice(item), 0) || 0;
+  const roundingDifference = order.amount - unroundedTotal;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
         <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -209,11 +212,14 @@ const PaymentModal: React.FC<{
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {fullOrder?.orderItems.map(item => {
+                                {fullOrder?.orderItems.map((item, index) => {
                                     const product = products.find(p => p.id === item.productId);
                                     const category = categories.find(c => c.name === product?.category);
                                     const isArea = category?.unitType === 'Per Luas';
-                                    const itemTotal = calculateItemPrice(item);
+                                    let itemTotal = calculateItemPrice(item);
+                                    if (fullOrder && index === fullOrder.orderItems.length - 1) {
+                                        itemTotal += roundingDifference;
+                                    }
                                     return (
                                         <tr key={item.id}>
                                             <td className="py-2 px-3">{item.description || '-'}</td>
