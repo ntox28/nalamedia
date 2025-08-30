@@ -138,7 +138,8 @@ export type ProductionStatusDisplay = 'Dalam Antrian' | 'Proses Cetak' | 'Siap A
 export interface Payment {
   amount: number;
   date: string;
-  source: string;
+  methodId: string;
+  methodName: string;
 }
 
 // Tipe data untuk setiap item di halaman piutang
@@ -151,6 +152,8 @@ export interface ReceivableItem {
     productionStatus: ProductionStatusDisplay;
     payments?: Payment[];
     discount?: number;
+    deliveryDate?: string;
+    deliveryNote?: string;
 }
 
 // Tipe data untuk setiap item di halaman pengeluaran
@@ -273,6 +276,13 @@ export interface StoreInfo {
   address: string;
   phone: string;
   email: string;
+}
+
+export interface PaymentMethod {
+  id: string;
+  name: string;
+  type: 'Tunai' | 'Transfer Bank' | 'QRIS' | 'E-Wallet';
+  details: string;
 }
 
 // --- Component Props ---

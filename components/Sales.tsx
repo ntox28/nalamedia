@@ -707,7 +707,12 @@ const Sales: React.FC<SalesProps> = ({
               filteredOrders.map(order => (
                 <div key={order.id} className="bg-gray-50 p-4 rounded-lg border">
                   <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-purple-700">{order.customer}</h3>
+                    <div>
+                      <h3 className="font-bold text-purple-700">{order.customer}</h3>
+                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-fuchsia-100 text-fuchsia-800">
+                        Dalam Antrian
+                      </span>
+                    </div>
                     <p className="text-sm font-semibold text-gray-500">{order.id}</p>
                   </div>
                   

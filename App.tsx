@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -16,7 +17,7 @@ import Payroll from './components/Payroll';
 import Login from './components/Login';
 import { supabase } from './supabaseClient';
 import { type Session } from '@supabase/supabase-js';
-import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo } from './types';
+import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod } from './types';
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
 
 console.log("Build: Script is being parsed and component is about to be created.");
@@ -43,6 +44,10 @@ const DEFAULT_STORE_INFO: StoreInfo = {
     phone: "0813-9872-7722",
     email: "nalamedia.kra@gmail.com",
 };
+
+const DEFAULT_PAYMENT_METHODS: PaymentMethod[] = [
+    { id: 'cash-default', name: 'Tunai', type: 'Tunai', details: 'Pembayaran tunai di kasir' }
+];
 
 const App: React.FC = () => {
   console.log("Render: Component is rendering.");
@@ -80,6 +85,8 @@ const App: React.FC = () => {
   const [noteCounter, setNoteCounter] = useState(1);
   const [notePrefix, setNotePrefix] = useState('INV-');
   const [initialCash, setInitialCash] = useState<number>(0);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
+
 
   const clearAllData = useCallback(() => {
     console.log("Clearing all application data.");
@@ -103,6 +110,7 @@ const App: React.FC = () => {
     setMenuPermissions(DEFAULT_MENU_PERMISSIONS);
     setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
     setStoreInfo(DEFAULT_STORE_INFO);
+    setPaymentMethods(DEFAULT_PAYMENT_METHODS);
     setLegacyIncome(null);
     setLegacyExpense(null);
     setLegacyReceivables([]);
@@ -184,6 +192,7 @@ const App: React.FC = () => {
     const notifSetting = settings.find(s => s.key === 'notificationSettings');
     const storeInfoSetting = settings.find(s => s.key === 'storeInfo');
     const initialCashSetting = settings.find(s => s.key === 'initialCash');
+    const paymentMethodsSetting = settings.find(s => s.key === 'paymentMethods');
 
     if (menuPermsSetting && menuPermsSetting.value) {
         const dbPermissions = menuPermsSetting.value as MenuPermissions;
@@ -192,6 +201,9 @@ const App: React.FC = () => {
     }
     if (notifSetting) setNotificationSettings(notifSetting.value);
     if (storeInfoSetting) setStoreInfo(storeInfoSetting.value);
+    if (paymentMethodsSetting && Array.isArray(paymentMethodsSetting.value)) {
+        setPaymentMethods(paymentMethodsSetting.value);
+    }
     if (initialCashSetting && typeof initialCashSetting.value === 'number') {
         setInitialCash(initialCashSetting.value);
     } else {
@@ -203,7 +215,10 @@ const App: React.FC = () => {
     if(legacyIncomeSetting && legacyIncomeSetting.value.amount > 0) setLegacyIncome(legacyIncomeSetting.value); else setLegacyIncome(null);
     if(legacyExpenseSetting && legacyExpenseSetting.value.amount > 0) setLegacyExpense(legacyExpenseSetting.value); else setLegacyExpense(null);
 
-    const processedOrderIds = new Set(allFetchedReceivables.map(r => r.id));
+    // FIX: An order is only "processed" when its status is NOT 'Dalam Antrian'.
+    // It remains "unprocessed" even if paid (DP), as long as it hasn't been sent to production.
+    const processedReceivables = allFetchedReceivables.filter(r => r.productionStatus !== 'Dalam Antrian');
+    const processedOrderIds = new Set(processedReceivables.map(r => r.id));
     setUnprocessedOrders(allFetchedOrders.filter(o => !processedOrderIds.has(o.id)));
 
     const newBoardData: KanbanData = { queue: [], printing: [], warehouse: [], delivered: [] };
@@ -403,6 +418,20 @@ const App: React.FC = () => {
         alert("Informasi toko berhasil diperbarui.");
     }
   }, []);
+  
+  const handleUpdatePaymentMethods = useCallback(async (newMethods: PaymentMethod[]) => {
+    const { error } = await supabase
+        .from('app_settings')
+        .upsert({ key: 'paymentMethods', value: newMethods }, { onConflict: 'key' });
+
+    if (error) {
+        console.error("Error updating payment methods:", error);
+        alert(`Gagal menyimpan metode pembayaran: ${error.message}`);
+    } else {
+        setPaymentMethods(newMethods);
+        alert("Metode pembayaran berhasil diperbarui.");
+    }
+  }, []);
 
   const handleUpdateInitialCash = useCallback(async (amount: number) => {
     const { error } = await supabase
@@ -440,13 +469,29 @@ const App: React.FC = () => {
   }, []);
 
   const handleProcessOrder = useCallback(async (orderId: string) => {
-      const order = allOrders.find(o => o.id === orderId);
-      if (!order) return;
-      const newReceivable: Omit<ReceivableItem, 'payments'> = { id: order.id, customer: order.customer, amount: order.totalPrice, due: new Date().toISOString().substring(0, 10), paymentStatus: 'Belum Lunas', productionStatus: 'Dalam Antrian' };
-      const { data, error } = await supabase.from('receivables').insert(newReceivable).select().single();
-      if (error || !data) { alert(`Gagal proses order: ${error?.message}`); return; }
-      // State updates will be handled by real-time subscription.
-  }, [allOrders]);
+    const existingReceivable = receivables.find(r => r.id === orderId);
+
+    if (existingReceivable) {
+        const { error } = await supabase
+            .from('receivables')
+            .update({ productionStatus: 'Proses Cetak' })
+            .eq('id', orderId);
+        if (error) { alert(`Gagal update status produksi: ${error.message}`); return; }
+    } else {
+        const order = allOrders.find(o => o.id === orderId);
+        if (!order) return;
+        const newReceivable: Omit<ReceivableItem, 'payments'> = {
+            id: order.id,
+            customer: order.customer,
+            amount: order.totalPrice,
+            due: new Date().toISOString().substring(0, 10),
+            paymentStatus: 'Belum Lunas',
+            productionStatus: 'Proses Cetak'
+        };
+        const { error } = await supabase.from('receivables').insert(newReceivable);
+        if (error) { alert(`Gagal proses order: ${error.message}`); return; }
+    }
+  }, [allOrders, receivables]);
 
   const handleDeleteOrder = useCallback(async (orderId: string) => {
       const { error } = await supabase.from('orders').delete().eq('id', orderId);
@@ -498,22 +543,73 @@ const App: React.FC = () => {
     if (error || !data) { alert(`Gagal proses bayar: ${error?.message}`); return; }
     // State updates will be handled by real-time subscription.
   }, [receivables]);
+  
+  const handlePayUnprocessedOrder = useCallback(async (orderId: string, paymentDetails: Payment, newDiscount: number) => {
+    const order = allOrders.find(o => o.id === orderId);
+    if (!order) {
+        alert('Order tidak ditemukan!');
+        return;
+    }
 
-  const handleBulkProcessPayment = useCallback(async (orderIds: string[], paymentDate: string, paymentSource: string) => {
-    const updates = orderIds.map(id => {
-        const receivable = receivables.find(r => r.id === id);
-        if (!receivable) return null;
-        const totalPaid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
-        const remainingAmount = receivable.amount - (receivable.discount || 0) - totalPaid;
-        if (remainingAmount <= 0) return null;
-        const newPayment: Payment = { amount: remainingAmount, date: paymentDate, source: paymentSource };
-        const updatedPayments = [...(receivable.payments || []), newPayment];
-        return supabase.from('receivables').update({ payments: updatedPayments, paymentStatus: 'Lunas' }).eq('id', id);
-    }).filter(Boolean);
+    const totalPaid = paymentDetails.amount;
+    let newPaymentStatus: PaymentStatus = 'Belum Lunas';
+    if (totalPaid + newDiscount >= order.totalPrice) {
+        newPaymentStatus = 'Lunas';
+    }
 
-    await Promise.all(updates);
-    // Real-time will handle the update, no need to fetchAllData here.
-  }, [receivables]);
+    const newReceivable: ReceivableItem = {
+        id: order.id,
+        customer: order.customer,
+        amount: order.totalPrice,
+        due: order.orderDate,
+        paymentStatus: newPaymentStatus,
+        productionStatus: 'Dalam Antrian',
+        payments: [paymentDetails],
+        discount: newDiscount,
+    };
+
+    const { data, error } = await supabase.from('receivables').insert(newReceivable).select().single();
+    if (error || !data) {
+        alert(`Gagal memproses pembayaran untuk order baru: ${error?.message}`);
+        return;
+    }
+  }, [allOrders]);
+
+  const handleBulkProcessPayment = useCallback(async (orderIds: string[], paymentDate: string, paymentMethodId: string) => {
+    const method = paymentMethods.find(m => m.id === paymentMethodId);
+    if (!method) return;
+
+    const receivableIds = new Set(receivables.map(r => r.id));
+    const operations: Promise<any>[] = [];
+
+    orderIds.forEach(id => {
+        if (receivableIds.has(id)) {
+            const receivable = receivables.find(r => r.id === id)!;
+            const totalPaid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+            const remainingAmount = receivable.amount - (receivable.discount || 0) - totalPaid;
+            if (remainingAmount > 0) {
+                const newPayment: Payment = { amount: remainingAmount, date: paymentDate, methodId: method.id, methodName: method.name };
+                const updatedPayments = [...(receivable.payments || []), newPayment];
+                // FIX: The Supabase update builder must be executed to return a promise. Adding .select() makes it a promise-like object suitable for Promise.all.
+                operations.push(supabase.from('receivables').update({ payments: updatedPayments, paymentStatus: 'Lunas' }).eq('id', id).select());
+            }
+        } else {
+            const order = allOrders.find(o => o.id === id);
+            if (order) {
+                const payment: Payment = { amount: order.totalPrice, date: paymentDate, methodId: method.id, methodName: method.name };
+                const newReceivable: ReceivableItem = {
+                    id: order.id, customer: order.customer, amount: order.totalPrice,
+                    due: order.orderDate, paymentStatus: 'Lunas', productionStatus: 'Dalam Antrian',
+                    payments: [payment], discount: 0,
+                };
+                // FIX: The Supabase insert builder must be executed to return a promise. Adding .select() makes it a promise-like object suitable for Promise.all.
+                operations.push(supabase.from('receivables').insert(newReceivable).select());
+            }
+        }
+    });
+
+    await Promise.all(operations);
+  }, [receivables, allOrders, paymentMethods]);
 
   const handleAddExpense = useCallback(async (newExpense: Omit<ExpenseItem, 'id'>) => {
     const { data, error } = await supabase.from('expenses').insert(newExpense).select().single();
@@ -526,6 +622,17 @@ const App: React.FC = () => {
     const { data, error } = await supabase.from('receivables').update({ productionStatus: statusMap[to] }).eq('id', orderId).select().single();
     if (error || !data) { alert(`Gagal pindah status: ${error.message}`); return; }
     // State updates will be handled by real-time subscription.
+  }, []);
+
+  const handleDeliverOrder = useCallback(async (orderId: string, deliveryNote: string) => {
+    const updatePayload = {
+      productionStatus: 'Telah Dikirim' as ProductionStatusDisplay,
+      deliveryDate: new Date().toISOString().substring(0, 10),
+      deliveryNote: deliveryNote,
+    };
+    const { error } = await supabase.from('receivables').update(updatePayload).eq('id', orderId);
+    if (error) { alert(`Gagal menyerahkan order: ${error.message}`); return; }
+    // State updates handled by real-time.
   }, []);
 
   const handleCancelQueue = useCallback(async (orderId: string) => {
@@ -598,7 +705,7 @@ const App: React.FC = () => {
       const totalSalary = baseSalary + overtimePay + bonuses.reduce((s, b) => s + b.amount, 0) - deductions.reduce((s, d) => s + d.amount, 0);
       const newRecord: Omit<PayrollRecord, 'id'> = { employeeId, startDate, endDate, baseSalary, overtimePay, bonuses, deductions, totalSalary, processedAttendance };
       const { data, error } = await supabase.from('payroll_records').insert(newRecord).select().single();
-      if (error || !data) { alert(`Gagal proses gaji: ${error.message}`); return; }
+      if (error || !data) { alert(`Gagal proses gaji: ${error?.message}`); return; }
       // State updates will be handled by real-time subscription.
   }, []);
   
@@ -634,15 +741,15 @@ const App: React.FC = () => {
     switch (activeMenu) {
       case 'dashboard': return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} />;
       case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} />;
-      case 'receivables': return <Receivables receivables={receivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} />;
+      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} />;
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
       case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
-      case 'production': return <Production boardData={boardData} allOrders={allOrders} products={products} categories={categories} onProductionMove={handleProductionMove} onCancelQueue={handleCancelQueue} />;
+      case 'production': return <Production boardData={boardData} allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} onProductionMove={handleProductionMove} onDeliverOrder={handleDeliverOrder} onCancelQueue={handleCancelQueue} />;
       case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onDeleteAttendance={handleDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} />;
       case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} onAddProduct={handleAddProduct} onAddCategory={handleAddCategory} onAddFinishing={handleAddFinishing} onAddCustomer={handleAddCustomer} onAddSupplier={handleAddSupplier} onAddEmployee={handleAddEmployee} />;
       case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
       case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyIncome={legacyIncome} legacyExpense={legacyExpense} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onSetLegacyIncome={handleSetLegacyIncome} onSetLegacyExpense={handleSetLegacyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onSettleLegacyReceivable={handleSettleLegacyReceivable} onAddAsset={handleAddAsset} onAddDebt={handleAddDebt} />;
-      case 'settings': return <Settings users={users} menuPermissions={menuPermissions} currentUser={profile} currentUserLevel={profile!.level} notificationSettings={notificationSettings} storeInfo={storeInfo} onAddUser={handleAddProfile} onUpdateUser={handleUpdateUser} onUpdateMenuPermissions={handleUpdateMenuPermissions} onUpdateNotificationSettings={handleUpdateNotificationSettings} onUpdateStoreInfo={handleUpdateStoreInfo} />;
+      case 'settings': return <Settings users={users} menuPermissions={menuPermissions} currentUser={profile} currentUserLevel={profile!.level} notificationSettings={notificationSettings} storeInfo={storeInfo} paymentMethods={paymentMethods} onAddUser={handleAddProfile} onUpdateUser={handleUpdateUser} onUpdateMenuPermissions={handleUpdateMenuPermissions} onUpdateNotificationSettings={handleUpdateNotificationSettings} onUpdateStoreInfo={handleUpdateStoreInfo} onUpdatePaymentMethods={handleUpdatePaymentMethods} />;
       default: return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} />;
     }
   };

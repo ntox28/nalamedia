@@ -1,11 +1,13 @@
 
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem } from '../types';
+import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod } from '../types';
 import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
+
+type DisplayReceivable = ReceivableItem & { isUnprocessed?: boolean };
 
 // --- START: Reusable Components ---
 
@@ -80,19 +82,20 @@ const OrderListModal: React.FC<{
 
 // New Payment Modal
 const PaymentModal: React.FC<{
-  order: ReceivableItem;
+  order: DisplayReceivable;
   fullOrder: SavedOrder | undefined;
   products: ProductData[];
   finishings: FinishingData[];
   customers: CustomerData[];
   categories: CategoryData[];
+  paymentMethods: PaymentMethod[];
   onClose: () => void;
   onConfirmPayment: (orderId: string, paymentDetails: Payment, discountAmount: number) => void;
-}> = ({ order, fullOrder, products, finishings, customers, categories, onClose, onConfirmPayment }) => {
+}> = ({ order, fullOrder, products, finishings, customers, categories, paymentMethods, onClose, onConfirmPayment }) => {
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [discount, setDiscount] = useState<string>('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
-  const [paymentSource, setPaymentSource] = useState('Tunai');
+  const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
 
   useEffect(() => {
     if (order.discount) {
@@ -165,13 +168,20 @@ const PaymentModal: React.FC<{
           alert("Jumlah pembayaran harus lebih dari nol.");
           return;
       }
+      
+      const selectedMethod = paymentMethods.find(m => m.id === paymentMethodId);
+      if (!selectedMethod) {
+          alert("Silakan pilih metode pembayaran yang valid.");
+          return;
+      }
 
       const amountToRecord = Math.min(amountToPay, sisaTagihan);
 
       onConfirmPayment(order.id, {
         amount: amountToRecord,
         date: paymentDate,
-        source: paymentSource,
+        methodId: selectedMethod.id,
+        methodName: selectedMethod.name,
       }, finalDiscount);
   };
 
@@ -243,7 +253,7 @@ const PaymentModal: React.FC<{
                         <div key={index} className="flex justify-between items-center text-sm border-b last:border-b-0 pb-2 last:pb-0">
                           <div>
                             <p className="font-semibold text-gray-800">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(p.amount)}</p>
-                            <p className="text-xs text-gray-500">{p.source}</p>
+                            <p className="text-xs text-gray-500">{p.methodName}</p>
                           </div>
                           <p className="text-xs text-gray-500">{new Date(p.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                         </div>
@@ -299,12 +309,11 @@ const PaymentModal: React.FC<{
                             <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Sumber Dana</label>
-                            <select value={paymentSource} onChange={e => setPaymentSource(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
-                                <option>Tunai</option>
-                                <option>Transfer Bank</option>
-                                <option>QRIS</option>
-                                <option>Lainnya</option>
+                            <label className="block text-sm font-medium text-gray-700">Metode Pembayaran</label>
+                            <select value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
+                                {paymentMethods.map(method => (
+                                    <option key={method.id} value={method.id}>{method.name}</option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -336,19 +345,20 @@ const PaymentModal: React.FC<{
 // New Bulk Payment Modal
 const BulkPaymentModal: React.FC<{
   orders: ReceivableItem[];
+  paymentMethods: PaymentMethod[];
   onClose: () => void;
-  onConfirmBulkPayment: (paymentDate: string, paymentSource: string) => void;
-}> = ({ orders, onClose, onConfirmBulkPayment }) => {
+  onConfirmBulkPayment: (paymentDate: string, paymentMethodId: string) => void;
+}> = ({ orders, paymentMethods, onClose, onConfirmBulkPayment }) => {
     const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
-    const [paymentSource, setPaymentSource] = useState('Tunai');
+    const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
     
     const totalAmount = orders.reduce((sum, order) => {
         const paid = order.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
-        return sum + (order.amount - paid);
+        return sum + (order.amount - (order.discount || 0) - paid);
     }, 0);
     
     const handleConfirm = () => {
-        onConfirmBulkPayment(paymentDate, paymentSource);
+        onConfirmBulkPayment(paymentDate, paymentMethodId);
     };
 
     return (
@@ -372,12 +382,11 @@ const BulkPaymentModal: React.FC<{
                             <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Sumber Dana</label>
-                            <select value={paymentSource} onChange={e => setPaymentSource(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
-                                <option>Tunai</option>
-                                <option>Transfer Bank</option>
-                                <option>QRIS</option>
-                                <option>Lainnya</option>
+                            <label className="block text-sm font-medium text-gray-700">Metode Pembayaran</label>
+                            <select value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
+                                {paymentMethods.map(method => (
+                                    <option key={method.id} value={method.id}>{method.name}</option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -445,9 +454,95 @@ const InitialCashModal: React.FC<{
   );
 };
 
+// --- START: NEW SUMMARY MODAL ---
+const SummaryInfoModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  type: 'payments' | 'receivables' | 'expenses' | 'finalCash' | 'initialCashInfo';
+  data: {
+    payments?: { customer: string, orderId: string, methodName: string, amount: number }[];
+    receivables?: (ReceivableItem & { remaining: number })[];
+    expenses?: ExpenseItem[];
+    finalCashBreakdown?: { [key: string]: number };
+    finalCashTotal?: number;
+  };
+}> = ({ isOpen, onClose, title, type, data }) => {
+  if (!isOpen) return null;
+
+  const renderContent = () => {
+    switch(type) {
+      case 'initialCashInfo':
+        return (
+          <div className="p-4 bg-amber-50 border-l-4 border-amber-400 text-amber-700">
+            <p className="font-semibold">Informasi Kas Awal</p>
+            <p className="text-sm mt-1">Ini adalah nominal uang saldo awal harian. Masukan sesuai nominal menggunakan tombol (Kas Awal) di dalam menu Pembayaran sesuai nominal di laci untuk kembalian atau pecahan uang, agar akurat dalam menghitung Kas Akhir!!!</p>
+          </div>
+        );
+      case 'payments':
+        return (
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left">Pelanggan</th><th className="py-2 px-3 text-left">No Nota</th><th className="py-2 px-3 text-left">Sumber Dana</th><th className="py-2 px-3 text-right">Nominal</th></tr></thead>
+            <tbody className="divide-y">{data.payments?.map((p, i) => (<tr key={i}><td className="py-2 px-3">{p.customer}</td><td className="py-2 px-3">{p.orderId}</td><td className="py-2 px-3">{p.methodName}</td><td className="py-2 px-3 text-right">{formatCurrency(p.amount)}</td></tr>))}</tbody>
+          </table>
+        );
+      case 'receivables':
+        return (
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left">Pelanggan</th><th className="py-2 px-3 text-left">No Nota</th><th className="py-2 px-3 text-left">Status Produksi</th><th className="py-2 px-3 text-right">Sisa Tagihan</th></tr></thead>
+            <tbody className="divide-y">{data.receivables?.map(r => (<tr key={r.id}><td className="py-2 px-3">{r.customer}</td><td className="py-2 px-3">{r.id}</td><td className="py-2 px-3">{r.productionStatus}</td><td className="py-2 px-3 text-right">{formatCurrency(r.remaining)}</td></tr>))}</tbody>
+          </table>
+        );
+      case 'expenses':
+        return (
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left">Nama</th><th className="py-2 px-3 text-left">Kategori</th><th className="py-2 px-3 text-right">Jumlah</th></tr></thead>
+            <tbody className="divide-y">{data.expenses?.map(e => (<tr key={e.id}><td className="py-2 px-3">{e.name}</td><td className="py-2 px-3">{e.category}</td><td className="py-2 px-3 text-right">{formatCurrency(e.amount)}</td></tr>))}</tbody>
+          </table>
+        );
+      case 'finalCash':
+        return (
+          <div>
+            <div className="p-4 bg-pink-50 rounded-lg text-center mb-4">
+              <p className="text-sm text-pink-700">Total Kas Akhir</p>
+              <p className="text-3xl font-bold text-pink-600">{formatCurrency(data.finalCashTotal || 0)}</p>
+            </div>
+            <h4 className="font-semibold mb-2 text-gray-700">Rincian Pemasukan Hari Ini:</h4>
+            <div className="space-y-2">
+              {data.finalCashBreakdown && Object.entries(data.finalCashBreakdown).map(([method, amount]) => (
+                <div key={method} className="flex justify-between text-sm p-2 bg-gray-50 rounded-md">
+                  <span className="text-gray-600">{method}</span>
+                  <span className="font-medium">{formatCurrency(amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      default:
+        return <p>Tidak ada data untuk ditampilkan.</p>;
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center border-b pb-3 mb-4">
+          <h3 className="text-xl font-bold text-gray-800">{title}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+        </div>
+        <div className="flex-1 overflow-y-auto pr-2">
+          {renderContent()}
+        </div>
+      </div>
+    </div>
+  );
+};
+// --- END: NEW SUMMARY MODAL ---
+
 
 interface ReceivablesProps {
   receivables: ReceivableItem[];
+  unprocessedOrders: SavedOrder[];
   allOrders: SavedOrder[];
   boardData: KanbanData;
   products: ProductData[];
@@ -456,9 +551,11 @@ interface ReceivablesProps {
   categories: CategoryData[];
   expenses: ExpenseItem[];
   initialCash: number;
+  paymentMethods: PaymentMethod[];
   onUpdateInitialCash: (amount: number) => void;
   onProcessPayment: (orderId: string, paymentDetails: Payment, newDiscount?: number) => void;
-  onBulkProcessPayment: (orderIds: string[], paymentDate: string, paymentSource: string) => void;
+  onPayUnprocessedOrder: (orderId: string, paymentDetails: Payment, newDiscount: number) => void;
+  onBulkProcessPayment: (orderIds: string[], paymentDate: string, paymentMethodId: string) => void;
 }
 
 const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
@@ -471,17 +568,21 @@ const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> =
 
 
 const Receivables: React.FC<ReceivablesProps> = ({ 
-    receivables, allOrders, boardData, products, finishings, customers, categories, expenses, initialCash,
-    onProcessPayment, onBulkProcessPayment, onUpdateInitialCash 
+    receivables, unprocessedOrders, allOrders, boardData, products, finishings, customers, categories, expenses, initialCash, paymentMethods,
+    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash 
 }) => {
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
-  const [selectedOrder, setSelectedOrder] = useState<ReceivableItem | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<DisplayReceivable | null>(null);
   const [actionsMenu, setActionsMenu] = useState<string | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isBulkPayModalOpen, setBulkPayModalOpen] = useState(false);
   const [isInitialCashModalOpen, setInitialCashModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [summaryModal, setSummaryModal] = useState<{
+    type: 'payments' | 'receivables' | 'expenses' | 'finalCash' | 'initialCashInfo' | null;
+    title: string;
+  }>({ type: null, title: '' });
   
   // Filter states
   const [filterSearch, setFilterSearch] = useState('');
@@ -490,34 +591,56 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
 
+  const allDisplayItems: DisplayReceivable[] = useMemo(() => {
+    // All receivables are always displayed.
+    const processedItems: DisplayReceivable[] = receivables.map(r => ({ ...r, isUnprocessed: false }));
+
+    // Get the IDs of orders that already have a receivable record.
+    const receivableIds = new Set(receivables.map(r => r.id));
+
+    // From the unprocessed orders, only include those that DO NOT have a receivable yet.
+    const unprocessedOnlyItems: DisplayReceivable[] = unprocessedOrders
+        .filter(order => !receivableIds.has(order.id)) // This is the key fix
+        .map(order => ({
+            id: order.id,
+            customer: order.customer,
+            amount: order.totalPrice,
+            due: order.orderDate,
+            paymentStatus: 'Belum Lunas',
+            productionStatus: 'Dalam Antrian',
+            payments: [],
+            discount: 0,
+            isUnprocessed: true,
+        }));
+
+    // Combine both lists. Now there are no duplicates.
+    return [...processedItems, ...unprocessedOnlyItems];
+  }, [receivables, unprocessedOrders]);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
 
   const uniqueCustomers = useMemo(() => {
-    const customers = new Set(receivables.map(r => r.customer));
-    return Array.from(customers);
-  }, [receivables]);
+    const customerSet = new Set(allDisplayItems.map(r => r.customer));
+    return Array.from(customerSet);
+  }, [allDisplayItems]);
 
-  const filteredReceivables = useMemo(() => {
-    return receivables.filter(receivable => {
-      const order = allOrders.find(o => o.id === receivable.id);
-      if (!order) return false;
+  const filteredItems = useMemo(() => {
+    return allDisplayItems.filter(item => {
+      const order = allOrders.find(o => o.id === item.id);
+      if (!order) return true; // Keep items even if full order not found yet
 
-      // Filter by Search Query (Nota or Customer)
       const lowerCaseSearch = filterSearch.toLowerCase();
-      if (filterSearch && !receivable.id.toLowerCase().includes(lowerCaseSearch) && !receivable.customer.toLowerCase().includes(lowerCaseSearch)) {
+      if (filterSearch && !item.id.toLowerCase().includes(lowerCaseSearch) && !item.customer.toLowerCase().includes(lowerCaseSearch)) {
         return false;
       }
-      // Filter by Customer
-      if (filterCustomer && receivable.customer !== filterCustomer) {
+      if (filterCustomer && item.customer !== filterCustomer) {
         return false;
       }
-      // Filter by Payment Status
-      if (filterStatus && receivable.paymentStatus !== filterStatus) {
+      if (filterStatus && item.paymentStatus !== filterStatus) {
         return false;
       }
-      // Filter by Date Range
       const orderDate = order.orderDate;
       if (filterStartDate && orderDate < filterStartDate) {
         return false;
@@ -527,16 +650,16 @@ const Receivables: React.FC<ReceivablesProps> = ({
       }
       return true;
     }).sort((a, b) => b.id.localeCompare(a.id));
-  }, [receivables, allOrders, filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
+  }, [allDisplayItems, allOrders, filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
   
-  const paginatedReceivables = useMemo(() => {
+  const paginatedItems = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredReceivables.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredReceivables, currentPage]);
+    return filteredItems.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredItems, currentPage]);
 
-  const unpaidFilteredReceivables = useMemo(() => {
-    return filteredReceivables.filter(r => r.paymentStatus === 'Belum Lunas');
-  }, [filteredReceivables]);
+  const unpaidFilteredItems = useMemo(() => {
+    return filteredItems.filter(r => r.paymentStatus === 'Belum Lunas');
+  }, [filteredItems]);
   
   const handleResetFilters = () => {
     setFilterSearch('');
@@ -578,14 +701,14 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
   const receivablesTodayUnpaid = useMemo(() => {
       const todayOrderIds = new Set(allOrders.filter(o => o.orderDate === today).map(o => o.id));
-      return receivables
+      return allDisplayItems
           .filter(r => todayOrderIds.has(r.id) && r.paymentStatus === 'Belum Lunas')
           .reduce((sum, r) => {
               const totalPaid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
               const remaining = r.amount - (r.discount || 0) - totalPaid;
               return sum + (remaining > 0 ? remaining : 0);
           }, 0);
-  }, [receivables, allOrders, today]);
+  }, [allDisplayItems, allOrders, today]);
 
   const expensesToday = useMemo(() => {
       return expenses.filter(e => e.date === today).reduce((sum, e) => sum + e.amount, 0);
@@ -600,7 +723,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const finishedInWarehouseCount = getItemsCount(boardData.warehouse);
   const deliveredCount = getItemsCount(boardData.delivered);
 
-  const handleOpenPaymentModal = (order: ReceivableItem) => {
+  const handleOpenPaymentModal = (order: DisplayReceivable) => {
     setSelectedOrder(order);
   };
 
@@ -609,17 +732,57 @@ const Receivables: React.FC<ReceivablesProps> = ({
   };
   
   const handleConfirmPayment = (orderId: string, paymentDetails: Payment, discountAmount: number) => {
-    onProcessPayment(orderId, paymentDetails, discountAmount);
+    if (selectedOrder?.isUnprocessed) {
+      onPayUnprocessedOrder(orderId, paymentDetails, discountAmount);
+    } else {
+      onProcessPayment(orderId, paymentDetails, discountAmount);
+    }
     handleClosePaymentModal();
   };
   
-  const handleConfirmBulkPayment = (paymentDate: string, paymentSource: string) => {
-    const orderIdsToPay = unpaidFilteredReceivables.map(o => o.id);
+  const handleConfirmBulkPayment = (paymentDate: string, paymentMethodId: string) => {
+    const orderIdsToPay = unpaidFilteredItems.map(o => o.id);
     if (orderIdsToPay.length > 0) {
-        onBulkProcessPayment(orderIdsToPay, paymentDate, paymentSource);
+        onBulkProcessPayment(orderIdsToPay, paymentDate, paymentMethodId);
     }
     setBulkPayModalOpen(false);
   };
+
+  // --- START: Data calculations for Summary Modal ---
+  const paymentsTodayDetails = useMemo(() => {
+      const details: { customer: string, orderId: string, methodName: string, amount: number }[] = [];
+      receivables.forEach(r => {
+          r.payments?.forEach(p => {
+              if (p.date === today) {
+                  details.push({ customer: r.customer, orderId: r.id, methodName: p.methodName, amount: p.amount });
+              }
+          });
+      });
+      return details;
+  }, [receivables, today]);
+
+  const receivablesTodayUnpaidDetails = useMemo(() => {
+      const todayOrderIds = new Set(allOrders.filter(o => o.orderDate === today).map(o => o.id));
+      return receivables
+          .filter(r => todayOrderIds.has(r.id) && r.paymentStatus === 'Belum Lunas')
+          .map(r => {
+              const totalPaid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
+              const remaining = r.amount - (r.discount || 0) - totalPaid;
+              return { ...r, remaining };
+          })
+          .filter(r => r.remaining > 0);
+  }, [receivables, allOrders, today]);
+
+  const expensesTodayDetails = useMemo(() => expenses.filter(e => e.date === today), [expenses, today]);
+
+  const finalCashBreakdown = useMemo(() => {
+      const breakdown: { [methodName: string]: number } = {};
+      paymentsTodayDetails.forEach(p => {
+          breakdown[p.methodName] = (breakdown[p.methodName] || 0) + p.amount;
+      });
+      return breakdown;
+  }, [paymentsTodayDetails]);
+  // --- END: Data calculations for Summary Modal ---
 
   const handlePrintReceipt = (order: ReceivableItem) => {
     const fullOrder = allOrders.find(o => o.id === order.id);
@@ -1038,12 +1201,16 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
 
   const handlePrintCustomerReport = () => {
-    const customerName = filterCustomer || 'Semua Pelanggan (Sesuai Filter)';
+    const customerName = filterCustomer;
+    if (!customerName) {
+        alert("Silakan pilih pelanggan terlebih dahulu untuk mencetak laporan.");
+        return;
+    }
     const reportPeriod = (filterStartDate || filterEndDate) ? 
       `Periode: ${filterStartDate ? new Date(filterStartDate).toLocaleDateString('id-ID') : '...'} - ${filterEndDate ? new Date(filterEndDate).toLocaleDateString('id-ID') : '...'}` :
       'Periode: Semua Waktu';
 
-    const reportItems = filteredReceivables
+    const reportItems = filteredItems
         .sort((a, b) => {
             const dateA = allOrders.find(o => o.id === a.id)?.orderDate || '';
             const dateB = allOrders.find(o => o.id === b.id)?.orderDate || '';
@@ -1051,48 +1218,38 @@ const Receivables: React.FC<ReceivablesProps> = ({
         });
 
     let totalTagihan = 0;
+    let totalDibayar = 0;
     let totalSisa = 0;
 
-    const tableRows = reportItems.map((receivable, index) => {
+    const tableRows = reportItems.flatMap(receivable => {
         const fullOrder = allOrders.find(o => o.id === receivable.id);
-        if (!fullOrder) return '';
-        const firstItem = fullOrder.orderItems[0];
-        const product = products.find(p => p.id === firstItem.productId);
-        const category = categories.find(c => c.name === product?.category);
-        const isArea = category?.unitType === 'Per Luas';
+        if (!fullOrder) return [];
 
-        return `
-            <tr>
-                <td>${index + 1}</td>
-                <td>${receivable.id}</td>
-                <td>${firstItem.description || product?.name || 'N/A'}${fullOrder.orderItems.length > 1 ? ' (dan lainnya)' : ''}</td>
-                <td>${isArea ? `${firstItem.length}x${firstItem.width}` : '-'}</td>
-                <td>${firstItem.qty} Pcs</td>
-                <td>${receivable.paymentStatus}</td>
-                <td class="currency">${new Intl.NumberFormat('id-ID').format(receivable.amount)}</td>
-            </tr>
-        `;
+        const paid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+        const remaining = receivable.amount - (receivable.discount || 0) - paid;
+        
+        totalTagihan += receivable.amount;
+        totalDibayar += paid;
+        totalSisa += remaining > 0 ? remaining : 0;
+        
+        return fullOrder.orderItems.map((item, index) => {
+            const product = products.find(p => p.id === item.productId);
+            const isFirstItem = index === 0;
+
+            return `
+                <tr>
+                    ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.id}</td>` : ''}
+                    <td>${item.description || product?.name || 'N/A'}</td>
+                    <td>${item.qty} Pcs</td>
+                    ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.amount)}</td>` : ''}
+                    ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(paid)}</td>` : ''}
+                    ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(remaining)}</td>` : ''}
+                    ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.paymentStatus}</td>` : ''}
+                </tr>
+            `;
+        }).join('');
     }).join('');
     
-    const dpHistory = reportItems.filter(r => r.payments && r.payments.length > 0)
-        .flatMap(r => 
-            r.payments!.map(p => `
-                <div class="dp-item">
-                    <span>${new Date(p.date).toLocaleDateString('id-ID')} (Nota ${r.id}):</span>
-                    <span>${p.source}</span>
-                    <span class="currency">${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(p.amount)}</span>
-                </div>
-            `)
-        ).join('');
-
-    reportItems.forEach(r => {
-        totalTagihan += r.amount;
-        const paid = r.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
-        if (r.paymentStatus === 'Belum Lunas') {
-            totalSisa += (r.amount - paid);
-        }
-    });
-
     const printContent = `
         <html>
             <head>
@@ -1104,12 +1261,10 @@ const Receivables: React.FC<ReceivablesProps> = ({
                     .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
                     hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
                     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; }
+                    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; vertical-align: top; }
                     th { background-color: #f2f2f2; }
                     .currency { text-align: right; }
                     .summary-box { text-align: right; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; }
-                    .dp-history { margin-top: 15px; padding: 10px; border: 1px solid #eee; border-radius: 5px; background: #f9f9f9; font-size: 9pt; }
-                    .dp-history h3 { margin: 0 0 10px 0; font-size: 10pt; } .dp-item { display: flex; justify-content: space-between; margin-bottom: 5px; }
                     @media print { .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-after: always; } }
                 </style>
             </head>
@@ -1121,7 +1276,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                             <p style="font-size:8pt; margin:0;">Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar</p>
                             <p style="font-size:8pt; margin:0;">Telp/WA: 0813-9872-7722</p>
                         </div>
-                        <h1>Laporan Pelanggan</h1>
+                        <h1>Laporan Piutang</h1>
                     </div>
                     <hr>
                     <div class="customer-info">
@@ -1132,24 +1287,23 @@ const Receivables: React.FC<ReceivablesProps> = ({
                     <table>
                         <thead>
                             <tr>
-                                <th>No</th>
                                 <th>No. Nota</th>
-                                <th>Deskripsi</th>
-                                <th>Ukuran</th>
+                                <th>Deskripsi Item</th>
                                 <th>Qty</th>
+                                <th class="currency">Total Tagihan</th>
+                                <th class="currency">Dibayar</th>
+                                <th class="currency">Sisa</th>
                                 <th>Status</th>
-                                <th class="currency">Total (Rp)</th>
                             </tr>
                         </thead>
                         <tbody>${tableRows}</tbody>
                     </table>
                     
-                    ${dpHistory ? `<div class="dp-history"><h3>Riwayat Pembayaran (DP)</h3>${dpHistory}</div>` : ''}
-
                     <div class="summary-box">
                         <table style="width: 250px; float: right; border: none;">
-                            <tr><td style="border:none;">Total Tagihan:</td><td style="border:none;" class="currency"><strong>${new Intl.NumberFormat('id-ID').format(totalTagihan)}</strong></td></tr>
-                            <tr><td style="border:none;">Sisa Tagihan:</td><td style="border:none;" class="currency"><strong>${new Intl.NumberFormat('id-ID').format(totalSisa)}</strong></td></tr>
+                            <tr><td style="border:none;">Total Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalTagihan)}</strong></td></tr>
+                             <tr><td style="border:none;">Total Dibayar:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalDibayar)}</strong></td></tr>
+                            <tr><td style="border:none;">Sisa Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalSisa)}</strong></td></tr>
                         </table>
                     </div>
                     <div style="clear: both; margin-top: 40px; font-size: 9pt;">
@@ -1244,7 +1398,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
     }).join(`\n${divider}\n`);
     
     const totalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
-    const remainingAmount = order.amount - totalPaid;
+    const remainingAmount = order.amount - (order.discount || 0) - totalPaid;
 
     const summaryInfo = [
         `Total    : *${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(order.amount)}*`,
@@ -1292,11 +1446,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         return product.price[priceKey] || product.price.endCustomer;
     };
     
-    const banks = [
-      { id: 1, name: 'BRI', account_number: '6707-01-02-8864-537' },
-      { id: 2, name: 'BCA', account_number: '0154-361801' },
-      { id: 3, name: 'BPD JATENG', account_number: '3142-069325' }
-    ];
+    const banks = paymentMethods.filter(m => m.type === 'Transfer Bank' || m.type === 'QRIS' || m.type === 'E-Wallet');
 
     const unroundedTotal = fullOrder.orderItems.reduce((sum, item) => {
         const product = products.find(p => p.id === item.productId);
@@ -1451,9 +1601,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
                 <footer class="mt-8 pt-4 border-t border-gray-200 text-xs text-gray-500">
                     <p class="font-bold">Informasi Pembayaran:</p>
-                    <p>Pembayaran resmi hanya melalui rekening a/n <span class="font-semibold">Ariska Prima Diastari</span>.</p>
+                    <p>Pembayaran resmi hanya melalui rekening yang tertera di bawah ini.</p>
                     <div class="flex gap-4 mt-1">
-                        ${banks.map(b => `<p><span class="font-semibold">${b.name}:</span> ${b.account_number}</p>`).join('')}
+                        ${banks.map(b => `<p><span class="font-semibold">${b.name}:</span> ${b.details}</p>`).join('')}
                     </div>
                 </footer>
             </div>
@@ -1544,30 +1694,35 @@ const Receivables: React.FC<ReceivablesProps> = ({
             title="Kas Awal" 
             value={formatCurrency(initialCash)}
             gradient="bg-gradient-to-br from-gray-500 to-gray-600"
+            onClick={() => setSummaryModal({ type: 'initialCashInfo', title: 'Informasi Kas Awal' })}
         />
         <StatCard 
             icon={<CreditCardIcon />} 
             title="Pembayaran Hari Ini" 
             value={formatCurrency(paymentsToday)}
             gradient="bg-gradient-to-br from-green-500 to-emerald-500"
+            onClick={() => setSummaryModal({ type: 'payments', title: 'Ringkasan Pembayaran Hari Ini' })}
         />
         <StatCard 
             icon={<ChartBarIcon />} 
             title="Piutang Hari Ini" 
             value={formatCurrency(receivablesTodayUnpaid)}
             gradient="bg-gradient-to-br from-amber-500 to-orange-500"
+            onClick={() => setSummaryModal({ type: 'receivables', title: 'Piutang Order Hari Ini (Belum Lunas)' })}
         />
         <StatCard 
             icon={<ReceiptTaxIcon />} 
             title="Pengeluaran Hari Ini" 
             value={formatCurrency(expensesToday)}
             gradient="bg-gradient-to-br from-rose-500 to-red-500"
+            onClick={() => setSummaryModal({ type: 'expenses', title: 'Riwayat Pengeluaran Hari Ini' })}
         />
         <StatCard 
             icon={<CurrencyDollarIcon />} 
             title="Kas Akhir" 
             value={formatCurrency(finalCash)}
             gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500"
+            onClick={() => setSummaryModal({ type: 'finalCash', title: 'Rincian Kas Akhir' })}
         />
     </div>
 
@@ -1610,14 +1765,14 @@ const Receivables: React.FC<ReceivablesProps> = ({
                         <button 
                             onClick={() => setBulkPayModalOpen(true)}
                             className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 mr-2 disabled:bg-green-300 disabled:cursor-not-allowed"
-                            disabled={unpaidFilteredReceivables.length === 0}
+                            disabled={unpaidFilteredItems.length === 0}
                         >
                             Bayar Langsung
                         </button>
                         <button 
                             onClick={handlePrintCustomerReport}
                             className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed"
-                            disabled={filteredReceivables.length === 0}
+                            disabled={!filterCustomer}
                         >
                             Laporan Pelanggan
                         </button>
@@ -1640,7 +1795,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {paginatedReceivables.length > 0 ? paginatedReceivables.map(item => (
+              {paginatedItems.length > 0 ? paginatedItems.map(item => (
                 <tr key={item.id} className="hover:bg-gray-50">
                   <td className="py-4 px-4 whitespace-nowrap font-medium text-gray-800">{item.id}</td>
                   <td className="py-4 px-4 whitespace-nowrap">{item.customer}</td>
@@ -1700,7 +1855,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
           </table>
         </div>
         <Pagination
-          totalItems={filteredReceivables.length}
+          totalItems={filteredItems.length}
           itemsPerPage={ITEMS_PER_PAGE}
           currentPage={currentPage}
           onPageChange={setCurrentPage}
@@ -1714,13 +1869,15 @@ const Receivables: React.FC<ReceivablesProps> = ({
           finishings={finishings}
           customers={customers}
           categories={categories}
+          paymentMethods={paymentMethods}
           onClose={handleClosePaymentModal}
           onConfirmPayment={handleConfirmPayment}
         />
       )}
       {isBulkPayModalOpen && (
         <BulkPaymentModal
-            orders={unpaidFilteredReceivables}
+            orders={unpaidFilteredItems}
+            paymentMethods={paymentMethods}
             onClose={() => setBulkPayModalOpen(false)}
             onConfirmBulkPayment={handleConfirmBulkPayment}
         />
@@ -1730,6 +1887,21 @@ const Receivables: React.FC<ReceivablesProps> = ({
             currentAmount={initialCash}
             onClose={() => setInitialCashModalOpen(false)}
             onSave={onUpdateInitialCash}
+        />
+    )}
+    {summaryModal.type && (
+        <SummaryInfoModal
+            isOpen={!!summaryModal.type}
+            onClose={() => setSummaryModal({ type: null, title: '' })}
+            title={summaryModal.title}
+            type={summaryModal.type}
+            data={{
+                payments: paymentsTodayDetails,
+                receivables: receivablesTodayUnpaidDetails,
+                expenses: expensesTodayDetails,
+                finalCashBreakdown: finalCashBreakdown,
+                finalCashTotal: finalCash
+            }}
         />
     )}
     </>

@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
-import { type Profile, type UserLevel, type MenuPermissions, type NotificationSettings, type StoreInfo } from '../types';
+import { type Profile, type UserLevel, type MenuPermissions, type NotificationSettings, type StoreInfo, type PaymentMethod } from '../types';
 import { PencilIcon, TrashIcon, PlusCircleIcon, EyeIcon, EyeSlashIcon } from './Icons';
 import { ALL_MENU_ITEMS } from '../constants';
 
@@ -124,6 +125,117 @@ const AddProfileModal: React.FC<{
         </div>
     );
 };
+
+// --- Payment Method Manager Component ---
+const PaymentMethodModal: React.FC<{
+    method?: PaymentMethod;
+    onSave: (data: PaymentMethod) => void;
+    onClose: () => void;
+}> = ({ method, onSave, onClose }) => {
+    const [formData, setFormData] = useState<Omit<PaymentMethod, 'id'>>({
+        name: method?.name || '',
+        type: method?.type || 'Transfer Bank',
+        details: method?.details || '',
+    });
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave({
+            id: method?.id || crypto.randomUUID(),
+            ...formData,
+        });
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center border-b pb-3 mb-5">
+                    <h3 className="text-xl font-bold text-gray-800">{method ? 'Edit' : 'Tambah'} Metode Pembayaran</h3>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium">Nama Tampilan</label>
+                        <input value={formData.name} onChange={e => setFormData(p => ({...p, name: e.target.value}))} className="mt-1 w-full p-2 border rounded-md" placeholder="e.g., BCA Nala" required />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium">Tipe</label>
+                        <select value={formData.type} onChange={e => setFormData(p => ({...p, type: e.target.value as PaymentMethod['type']}))} className="mt-1 w-full p-2 border bg-white rounded-md">
+                            <option>Transfer Bank</option>
+                            <option>QRIS</option>
+                            <option>E-Wallet</option>
+                            <option>Tunai</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium">Detail</label>
+                        <textarea value={formData.details} onChange={e => setFormData(p => ({...p, details: e.target.value}))} className="mt-1 w-full p-2 border rounded-md" placeholder="e.g., 123456789 a/n Nala Media" rows={3}></textarea>
+                    </div>
+                    <div className="border-t pt-4 flex justify-end">
+                        <button type="submit" className="bg-pink-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-pink-700">Simpan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+const PaymentMethodsManager: React.FC<{
+    methods: PaymentMethod[];
+    onSave: (methods: PaymentMethod[]) => void;
+}> = ({ methods, onSave }) => {
+    const [modal, setModal] = useState<{ isOpen: boolean; data?: PaymentMethod }>({ isOpen: false });
+
+    const handleSaveMethod = (methodData: PaymentMethod) => {
+        const existing = methods.find(m => m.id === methodData.id);
+        let newMethods;
+        if (existing) {
+            newMethods = methods.map(m => m.id === methodData.id ? methodData : m);
+        } else {
+            newMethods = [...methods, methodData];
+        }
+        onSave(newMethods);
+        setModal({ isOpen: false });
+    };
+
+    const handleDeleteMethod = (id: string) => {
+        if (id === 'cash-default') {
+            alert('Metode pembayaran "Tunai" tidak dapat dihapus.');
+            return;
+        }
+        if (window.confirm("Apakah Anda yakin ingin menghapus metode pembayaran ini?")) {
+            onSave(methods.filter(m => m.id !== id));
+        }
+    };
+
+    return (
+        <div>
+            {modal.isOpen && <PaymentMethodModal method={modal.data} onClose={() => setModal({ isOpen: false })} onSave={handleSaveMethod} />}
+            <div className="flex justify-between items-center mb-4">
+                <p className="text-gray-600">Atur semua rekening bank, QRIS, dan E-Wallet Anda.</p>
+                <button onClick={() => setModal({ isOpen: true })} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700">
+                    <PlusCircleIcon className="mr-2 h-4 w-4" />
+                    Tambah Metode
+                </button>
+            </div>
+            <div className="space-y-3">
+                {methods.map(method => (
+                    <div key={method.id} className="bg-gray-50 p-3 rounded-lg border flex justify-between items-center">
+                        <div>
+                            <p className="font-semibold text-gray-800">{method.name} <span className="text-xs font-normal text-white bg-gray-400 px-2 py-0.5 rounded-full ml-2">{method.type}</span></p>
+                            <p className="text-sm text-gray-600">{method.details}</p>
+                        </div>
+                        <div className="space-x-2">
+                            <button onClick={() => setModal({ isOpen: true, data: method })} className="p-1.5 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4"/></button>
+                            <button onClick={() => handleDeleteMethod(method.id)} className="p-1.5 text-gray-500 hover:text-red-600" disabled={method.id === 'cash-default'}><TrashIcon className="h-4 w-4"/></button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
 
 // --- Menu Access Manager Component ---
 const allUserLevels: UserLevel[] = ['Kasir', 'Office', 'Produksi', 'Admin'];
@@ -355,15 +467,18 @@ interface SettingsProps {
     currentUserLevel: UserLevel;
     notificationSettings: NotificationSettings;
     storeInfo: StoreInfo | null;
+    paymentMethods: PaymentMethod[];
     onAddUser: (newUser: { name: string; level: UserLevel; }) => void;
     onUpdateUser: (updatedUser: Profile) => void;
     onUpdateMenuPermissions: (permissions: MenuPermissions) => void;
     onUpdateNotificationSettings: (settings: NotificationSettings) => void;
     onUpdateStoreInfo: (newInfo: StoreInfo) => void;
+    onUpdatePaymentMethods: (newMethods: PaymentMethod[]) => void;
 }
 
 const TABS_ADMIN = [
     { key: 'storeInfo', label: 'Informasi Toko' },
+    { key: 'paymentMethods', label: 'Metode Pembayaran' },
     { key: 'userManagement', label: 'Manajemen Pengguna & Akses' },
     { key: 'notifications', label: 'Notifikasi' },
 ];
@@ -373,7 +488,7 @@ const TABS_USER = [
 ];
 
 
-const Settings: React.FC<SettingsProps> = ({ users, menuPermissions, currentUser, currentUserLevel, notificationSettings, storeInfo, onAddUser, onUpdateUser, onUpdateMenuPermissions, onUpdateNotificationSettings, onUpdateStoreInfo }) => {
+const Settings: React.FC<SettingsProps> = ({ users, menuPermissions, currentUser, currentUserLevel, notificationSettings, storeInfo, paymentMethods, onAddUser, onUpdateUser, onUpdateMenuPermissions, onUpdateNotificationSettings, onUpdateStoreInfo, onUpdatePaymentMethods }) => {
     const accessibleTabs = currentUserLevel === 'Admin' ? TABS_ADMIN : TABS_USER;
     const [activeTab, setActiveTab] = useState(accessibleTabs[0].key);
     const [modalState, setModalState] = useState<{ isOpen: boolean; user?: Profile | null }>({ isOpen: false });
@@ -457,6 +572,10 @@ const Settings: React.FC<SettingsProps> = ({ users, menuPermissions, currentUser
                             <div><label className="block text-sm font-medium text-gray-700">Email</label><input type="email" name="email" value={localStoreInfo.email} onChange={handleStoreInfoChange} className="mt-1 w-full p-2 border border-gray-300 rounded-md" /></div>
                             <div className="flex justify-end mt-6 border-t pt-4"><button onClick={() => onUpdateStoreInfo(localStoreInfo)} className="bg-pink-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-pink-700 transition-colors">Simpan Perubahan</button></div>
                         </div>
+                    )}
+
+                    {activeTab === 'paymentMethods' && (
+                        <PaymentMethodsManager methods={paymentMethods} onSave={onUpdatePaymentMethods} />
                     )}
                     
                     {activeTab === 'userManagement' && (

@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 import { type MenuItem } from './types';
 import { 
@@ -82,6 +81,7 @@ export const SETTINGS_MENU_ITEM: MenuItem = {
     icon: <Cog6ToothIcon />,
     tabs: [
         { key: 'storeInfo', label: 'Informasi Toko' },
+        { key: 'paymentMethods', label: 'Metode Pembayaran' },
         { key: 'userManagement', label: 'Manajemen Pengguna & Akses' },
         { key: 'notifications', label: 'Notifikasi' },
     ]
