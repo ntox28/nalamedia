@@ -451,104 +451,113 @@ const Sales: React.FC<SalesProps> = ({
   const handlePrintSPK = (order: SavedOrder) => {
       const printContent = `
         <html>
-          <head>
-            <title>SPK ${order.id}</title>
-            <style>
-              @page {
-                size: 58mm auto;
-                margin: 0;
-              }
-              body {
-                font-family: sans-serif;
-                font-size: 10px;
-                color: #000;
-                margin: 0;
-                padding: 5px 0;
-                line-height: 1.2;
-              }
-              .spk-container {
-                width: 170px;
-                margin: 0 auto;
-              }
-              p, div {
-                margin: 0;
-                padding: 0;
-                word-wrap: break-word;
-              }
-              .center { text-align: center; }
-              .bold { font-weight: bold; }
-              .divider {
-                border: 0;
-                border-top: 1px dashed black;
-                margin: 4px 0;
-              }
-              .customer-name {
-                  font-size: 12px;
-                  font-weight: bold;
-              }
-              .item-details {
-                  padding-left: 14px;
-                  text-indent: -14px;
-              }
-              .attention-box {
-                  border: 1px solid #000;
-                  padding: 4px;
-                  margin-top: 5px;
-                  text-align: center;
-              }
-              .attention-small {
-                  font-size: 8px;
-                  line-height: 1.1;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="spk-container">
-                <div class="center bold">** SPK PRODUKSI **</div>
-                <div class="divider"></div>
-                <div class="center bold">${order.customer}</div>
-                <div class="center bold">${order.id}</div>
-                <div class="center">${new Date(order.orderDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-                <div class="divider"></div>
-                <div>No.&nbsp;&nbsp;Detail Pesanan</div>
-                <div class="divider"></div>
-                
-                ${order.orderItems.map((item, index) => {
-                    const product = products.find(p => p.id === item.productId);
-                    const category = categories.find(c => c.name === product?.category);
-                    const isAreaBased = category?.unitType === 'Per Luas';
+  <head>
+    <title>SPK ${order.id}</title>
+    <style>
+      @page {
+        size: 58mm auto;
+        margin: 0;
+      }
+      body {
+        font-family: sans-serif;
+        font-size: 10px;
+        color: #000;
+        margin: 0;
+        padding: 0; /* biar full-bleed */
+        line-height: 1.2;
+      }
+      .spk-container {
+        width: 58mm;   /* isi penuh selebar kertas */
+        margin: 0;     
+        padding: 0;    
+      }
+      p, div {
+        margin: 0;
+        padding: 0;
+        word-wrap: break-word;
+      }
+      .center { text-align: center; }
+      .bold { font-weight: bold; }
+      .uppercase { text-transform: uppercase; }
+      .divider {
+        border: 0;
+        border-top: 1px dashed black;
+        margin: 4px 0;
+      }
+      .customer-name {
+        font-size: 14px;      /* lebih besar dari default */
+        font-weight: bold;
+        text-transform: uppercase;
+      }
+      .item-details {
+        padding-left: 14px;
+        text-indent: -14px;
+      }
+      .attention-box {
+        border: 1px solid transparent;
+        padding: 4px;
+        margin-top: 5px;
+        text-align: center;
+      }
+      .attention-small {
+        font-size: 10px;
+        line-height: 1.1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="spk-container">
+      <div class="center bold">** SPK PRODUKSI **</div>
+      <div class="divider"></div>
+      <div class="center customer-name">${order.customer}</div> <!-- Nama customer besar & kapital -->
+      <div class="divider"></div>
+      <div>No. Nota : ${order.id}</div>
+      <div>Tanggal : ${new Date(order.orderDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+      <div>Kasir : Admin</div>
+      <div class="divider"></div>
+      <div>No.&nbsp;&nbsp;Detail Pesanan</div>
+      <div class="divider"></div>
+      
+      ${order.orderItems.map((item, index) => {
+          const product = products.find(p => p.id === item.productId);
+          const category = categories.find(c => c.name === product?.category);
+          const isAreaBased = category?.unitType === 'Per Luas';
 
-                    const detailsParts = [];
-                    if (isAreaBased && parseFloat(item.length) > 0 && parseFloat(item.width) > 0) {
-                        detailsParts.push(`${item.length}x${item.width}m`);
-                    }
-                    detailsParts.push(`${item.qty} Pcs`);
-                    if (item.finishing && item.finishing !== 'Tanpa Finishing') {
-                        detailsParts.push(item.finishing);
-                    }
-                    
-                    const detailsLine = detailsParts.join(' - ');
+          const detailsParts = [];
+          if (isAreaBased && parseFloat(item.length) > 0 && parseFloat(item.width) > 0) {
+              detailsParts.push(`${item.length}x${item.width}m`);
+          }
+          detailsParts.push(`${item.qty} Pcs`);
+          if (item.finishing && item.finishing !== 'Tanpa Finishing') {
+              detailsParts.push(item.finishing);
+          }
+          
+          const detailsLine = detailsParts.join(' - ');
 
-                    return `
-                        <div style="margin-bottom: 4px;">
-                            <div class="item-details"><span class="bold">${index + 1}. ${item.description || 'Tanpa deskripsi'}</span></div>
-                            <div class="item-details">&nbsp;&nbsp;&nbsp;${product?.name || 'N/A'}</div>
-                            <div class="item-details">&nbsp;&nbsp;&nbsp;${detailsLine}</div>
-                        </div>
-                    `;
-                }).join('')}
+          return `
+              <div style="margin-bottom: 4px;">
+                  <div class="item-details"><span class="bold uppercase">${index + 1}. ${item.description || 'Tanpa deskripsi'}</span></div>
+                  <div class="item-details">&nbsp;&nbsp;&nbsp;${product?.name || 'N/A'}</div>
+                  <div class="item-details">&nbsp;&nbsp;&nbsp;${detailsLine}</div>
+              </div>
+          `;
+      }).join('')}
 
-                <div class="divider"></div>
-                <div class="attention-box">
-                    <div class="center bold">PERHATIAN</div>
-                    <div class="attention-small center">Cek data pekerjaan sebelum cetak.</div>
-                    <div class="attention-small center">Pastikan semua data benar.</div>
-                    <div class="attention-small center">Tempel struk ini Ke Barang.</div>
-                    <div class="attention-small center">Jika Sudah Selesai Semua.</div>
-                </div>
-            </div>
-          </body>
-        </html>
+      <div class="divider"></div>
+      <div class="attention-box">
+        <div class="center bold">PERHATIAN</div>
+        <div class="attention-small center">- - - - - - - - - - - - - - - - - - - - - - - - -</div>
+        <div class="attention-small center">Cek data pekerjaan sebelum cetak.</div>
+        <div class="attention-small center">Pastikan semua data benar.</div>
+        <div class="attention-small center">Tempel struk ini Ke Barang.</div>
+        <div class="attention-small center">- - - - - - - - - - - - - - - - - - - - - - - - -</div>
+        <div class="attention-small center bold">PASTIKAN ISI DATA</div>
+        <div class="attention-small center bold">SERAH TERIMA DI APLIKASI!!!</div>
+        <div class="attention-small center">- - - - - - - - - - - - - - - - - - - - - - - - -</div>
+      </div>
+    </div>
+  </body>
+</html>
       `;
       const printWindow = window.open('', '_blank');
       if (printWindow) {
