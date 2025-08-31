@@ -513,7 +513,6 @@ const Sales: React.FC<SalesProps> = ({
       <div class="divider"></div>
       <div>No. Nota : ${order.id}</div>
       <div>Tanggal : ${new Date(order.orderDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-      <div>Kasir : Admin</div>
       <div class="divider"></div>
       <div>No.&nbsp;&nbsp;Detail Pesanan</div>
       <div class="divider"></div>
@@ -525,20 +524,20 @@ const Sales: React.FC<SalesProps> = ({
 
           const detailsParts = [];
           if (isAreaBased && parseFloat(item.length) > 0 && parseFloat(item.width) > 0) {
-              detailsParts.push(`${item.length}x${item.width}m`);
+              detailsParts.push(`${item.length}m X ${item.width}m`);
           }
           detailsParts.push(`${item.qty} Pcs`);
           if (item.finishing && item.finishing !== 'Tanpa Finishing') {
               detailsParts.push(item.finishing);
           }
           
-          const detailsLine = detailsParts.join(' - ');
+          const detailsLine = detailsParts.join(' | ');
 
           return `
               <div style="margin-bottom: 4px;">
                   <div class="item-details"><span class="bold uppercase">${index + 1}. ${item.description || 'Tanpa deskripsi'}</span></div>
-                  <div class="item-details">&nbsp;&nbsp;&nbsp;${product?.name || 'N/A'}</div>
-                  <div class="item-details">&nbsp;&nbsp;&nbsp;${detailsLine}</div>
+                  <div class="item-details">&nbsp;&nbsp;&nbsp;&nbsp;${product?.name || 'N/A'}</div>
+                  <div class="item-details">&nbsp;&nbsp;&nbsp;&nbsp;${detailsLine}</div>
               </div>
           `;
       }).join('')}

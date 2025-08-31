@@ -838,17 +838,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
         const detailsParts = [];
         if (isArea && parseFloat(item.length) > 0 && parseFloat(item.width) > 0) {
-            detailsParts.push(`${item.length}x${item.width}m`);
+            detailsParts.push(`${item.length}m X ${item.width}m`);
         }
         detailsParts.push(`${item.qty} Pcs`);
 
         
-        const detailsLine = detailsParts.join(' // ');
+        const detailsLine = detailsParts.join(' | ');
 
         const materialAndFinishing = [
             product?.name || 'N/A',
             (item.finishing && item.finishing !== 'Tanpa Finishing') ? item.finishing : ''
-        ].filter(Boolean).join(' - ');
+        ].filter(Boolean).join(' | ');
 
         return `
             <div style="margin-bottom: 4px;">
@@ -865,50 +865,52 @@ const Receivables: React.FC<ReceivablesProps> = ({
             <head>
                 <title>Struk ${order.id}</title>
                 <style>
-                    @page { size: 80mm auto; margin: 0; }
-                    body {
-                        font-family: sans-serif;
-                        font-size: 12px;
-                        color: #000;
-                        margin: 0;
-                        padding: 5mm;
-                        width: 70mm; /* Content width */
-                        line-height: 1.3;
-                    }
-                    .container { width: 100%; }
-                    .center { text-align: center; }
-                    .bold { font-weight: bold; }
-                    .h1 { font-size: 20px; font-weight: bold; margin: 0; }
-                    .larger-text { font-size: 14px; }
-                    .address { font-size: 11px; }
-                    .divider { border: 0; border-top: 1px dashed black; margin: 5px 0; }
-                    .details-line { line-height: 1.2; }
-                    .summary-table { width: 100%; }
-                    .summary-table td { padding: 1px 0; }
-                    .summary-table .label { text-align: left; }
-                    .summary-table .value { text-align: right; }
-                    p, div { margin: 0; padding: 0; word-wrap: break-word; }
-                </style>
+  @page { size: 80mm auto; margin: 0; }
+  body {
+    font-family: sans-serif;
+    font-size: 12px;
+    color: #000;
+    margin: 0;
+    padding: 0; /* biar mepet kertas */
+    width: 80mm; /* penuh selebar kertas */
+    line-height: 1.3;
+  }
+  .container { width: 100%; }
+  .center { text-align: center; }
+  .bold { font-weight: bold; }
+  .uppercase { text-transform: uppercase; }
+  .h1 { font-size: 40px; font-weight: bold; margin: 0; }
+  .larger-text { font-size: 14px; }
+  .address { font-size: 11px; }
+  .divider { border: 0; border-top: 1px dashed black; margin: 5px 0; }
+  .details-line { line-height: 1.2; }
+  .summary-table { width: 100%; }
+  .summary-table td { padding: 1px 0; }
+  .summary-table .label { text-align: left; }
+  .summary-table .value { text-align: right; }
+  p, div { margin: 0; padding: 0; word-wrap: break-word; }
+</style>
             </head>
             <body>
                 <div class="container">
                     <div class="center">
                         <div class="h1">NALAMEDIA</div>
                     </div>
-                    <div class="divider"></div>
                     <div class="center">
                         <p class="address">Jl. Prof. Moh. Yamin Cerbonan, Karanganyar</p>
-                        <p>Whatsapp: 0813-9872-7722</p>
+                        <p>Whatsapp: <b>0813 9872 7722</b></p>
                         <p>Email: nalamedia.kra@gmail.com</p>
                     </div>
                     <div class="divider"></div>
                     <div class="center">
-                        <p class="larger-text bold">${order.customer}</p>
-                        <p class="bold">${order.id}</p>
-                        <p>${new Date(fullOrder.orderDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                      <p class="larger-text bold uppercase">${order.customer}</p>
                     </div>
                     <div class="divider"></div>
-                    <p>No. Detail Pesanan</p>
+                    <div>No. Nota : ${order.id}</div>
+                    <div>Tanggal : ${new Date(fullOrder.orderDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                    <div>Kasir : Admin</div>
+                    <div class="divider"></div>
+                    <p class="bold">No. Detail Pesanan</p>
                     <div class="divider"></div>
                     ${itemsHtml}
                     <div class="divider"></div>
@@ -940,8 +942,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
                     <div class="divider"></div>
                     <div class="center">
                         <p class="bold">PERHATIAN</p>
-                        <p>Komplain lebih dari</p>
-                        <p>1 hari tidak kami layani</p>
+                        <p>Komplain lebih dari 1 hari tidak kami layani</p>
+                        <p>Pembayaran hanya melalui rekening di atas.</p>
                         <p class="bold">Terima Kasih</p>
                     </div>
                 </div>
