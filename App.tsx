@@ -758,8 +758,8 @@ const App: React.FC = () => {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-100">
         <div className="text-center">
-          <img src="https://wqgbkwujfxdwlywxrjup.supabase.co/storage/v1/object/public/publik/nala%20persegi.svg" alt="Loading..." className="h-24 w-24 animate-pulse mx-auto" />
-          <p className="mt-4 text-gray-600">Memuat Aplikasi...</p>
+          <img src="https://wqgbkwujfxdwlywxrjup.supabase.co/storage/v1/object/public/publik/android-chrome-512x512%20cmyk.png" alt="Loading..." className="h-52 w-52 animate-pulse mx-auto" />
+          <p className="mt-4 text-gray-600">Sabar Cuk Loading iki . . .</p>
         </div>
       </div>
     );
