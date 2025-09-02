@@ -4,8 +4,8 @@
   "description": "Nala Pos And Prduction activity",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1e293b",
-  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "theme_color": "#c21068",
   "icons": [
     {
       "src": "https://wqgbkwujfxdwlywxrjup.supabase.co/storage/v1/object/public/publik/android-chrome-192x192.png",
