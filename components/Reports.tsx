@@ -220,6 +220,8 @@ const Reports: React.FC<ReportsProps> = ({
     const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`reports/${tab.key}`)), [menuPermissions]);
     const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
     const [currentPage, setCurrentPage] = useState(1);
+    const [sortConfig, setSortConfig] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'noNota', order: 'desc' });
+
 
     const { firstDay, lastDay } = getMonthDateRange();
     const [filterStartDate, setFilterStartDate] = useState(firstDay);
@@ -245,8 +247,16 @@ const Reports: React.FC<ReportsProps> = ({
     
     useEffect(() => {
         setCurrentPage(1);
-    }, [activeTab, filterStartDate, filterEndDate, selectedYear]);
+    }, [activeTab, filterStartDate, filterEndDate, selectedYear, sortConfig]);
     
+    const requestSort = (key: string) => {
+        let order: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.order === 'asc') {
+            order = 'desc';
+        }
+        setSortConfig({ key, order });
+    };
+
     const handleExport = () => {
         const dateRange = { startDate: filterStartDate, endDate: filterEndDate };
         switch(activeTab) {
@@ -307,33 +317,7 @@ const Reports: React.FC<ReportsProps> = ({
         let summaryHtml = '';
 
         if (activeTab === 'sales') {
-            const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
-                'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate'
-            };
-            const calculateItemPrice = (item: OrderItemData, orderCustomer: string): number => {
-                const customerData = customers.find(c => c.name === orderCustomer);
-                const customerLevel = customerData ? customerData.level : 'End Customer';
-                const priceKey = priceLevelMap[customerLevel];
-                if (!item.productId) return 0;
-                const productInfo = products.find(p => p.id === item.productId);
-                const finishingInfo = finishings.find(f => f.name === item.finishing);
-                if (!productInfo) return 0;
-                const categoryInfo = categories.find(c => c.name === productInfo.category);
-                const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-                let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-                const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-                let priceMultiplier = 1;
-                if (isAreaBased) {
-                    const length = parseFloat(item.length) || 0;
-                    const width = parseFloat(item.width) || 0;
-                    priceMultiplier = length * width;
-                }
-                const baseItemPrice = materialPrice + finishingPrice;
-                return (baseItemPrice * priceMultiplier) * item.qty;
-            };
-
-            let rowNum = 1;
-            const allDetailedSales = allDetailedSalesData.map(item => `
+            const allDetailedSales = sortedDetailedSalesData.map(item => `
                 <tr>
                     <td>${item.no}</td>
                     <td>${item.tanggal}</td>
@@ -536,8 +520,7 @@ const Reports: React.FC<ReportsProps> = ({
 
     const filteredSalesData = useMemo(() => {
         return allOrders
-            .filter(order => order.orderDate >= filterStartDate && order.orderDate <= filterEndDate)
-            .sort((a,b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
+            .filter(order => order.orderDate >= filterStartDate && order.orderDate <= filterEndDate);
     }, [allOrders, filterStartDate, filterEndDate]);
     
     const allDetailedSalesData = useMemo(() => {
@@ -566,7 +549,6 @@ const Reports: React.FC<ReportsProps> = ({
             return (baseItemPrice * priceMultiplier) * item.qty;
         };
 
-        let rowNum = 1;
         return filteredSalesData.flatMap(order => {
             const unroundedOrderTotal = order.orderItems.reduce((sum, item) => sum + calculateItemPrice(item, order.customer), 0);
             const roundingDifference = order.totalPrice - unroundedOrderTotal;
@@ -582,8 +564,8 @@ const Reports: React.FC<ReportsProps> = ({
                 
                 return {
                     key: `${order.id}-${item.id}`,
-                    no: rowNum++,
-                    tanggal: formatDate(order.orderDate),
+                    no: 0, // Will be recalculated after sort
+                    tanggal: order.orderDate,
                     noNota: order.id,
                     pelanggan: order.customer,
                     deskripsi: item.description,
@@ -598,10 +580,33 @@ const Reports: React.FC<ReportsProps> = ({
         });
     }, [filteredSalesData, products, categories, customers, finishings, receivables]);
     
+    const sortedDetailedSalesData = useMemo(() => {
+        let sortableItems = [...allDetailedSalesData];
+        if (sortConfig) {
+            sortableItems.sort((a, b) => {
+                const key = sortConfig.key as keyof typeof a;
+                const aValue = a[key];
+                const bValue = b[key];
+                
+                if (aValue === null || bValue === null) return 0;
+
+                const order = sortConfig.order === 'asc' ? 1 : -1;
+
+                if (typeof aValue === 'number' && typeof bValue === 'number') {
+                    return (aValue - bValue) * order;
+                }
+                
+                return String(aValue).localeCompare(String(bValue), 'id-ID', { numeric: true }) * order;
+            });
+        }
+        // Recalculate row number after sorting
+        return sortableItems.map((item, index) => ({ ...item, no: index + 1 }));
+    }, [allDetailedSalesData, sortConfig]);
+
     const paginatedSalesData = useMemo(() => {
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return allDetailedSalesData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-    }, [allDetailedSalesData, currentPage]);
+        return sortedDetailedSalesData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+    }, [sortedDetailedSalesData, currentPage]);
 
 
     const filteredReceivablesData = useMemo(() => {
@@ -700,6 +705,19 @@ const Reports: React.FC<ReportsProps> = ({
         const totalItems = filteredSalesData.reduce((sum, order) => sum + order.orderItems.reduce((itemSum, item) => itemSum + item.qty, 0), 0);
         const avgTransaction = totalTransactions > 0 ? totalSales / totalTransactions : 0;
         
+        const SortableHeader: React.FC<{ label: string; sortKey: string; className?: string }> = ({ label, sortKey, className }) => {
+            const isSorted = sortConfig?.key === sortKey;
+            const sortIcon = isSorted ? (sortConfig.order === 'asc' ? '▲' : '▼') : '';
+            return (
+                <th className={`py-2 px-3 text-left cursor-pointer select-none hover:bg-gray-100 ${className || ''}`} onClick={() => requestSort(sortKey)}>
+                    <div className="flex items-center">
+                        <span>{label}</span>
+                        {sortIcon && <span className="ml-1 text-xs text-gray-700">{sortIcon}</span>}
+                    </div>
+                </th>
+            );
+        };
+
         return (
             <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -715,16 +733,16 @@ const Reports: React.FC<ReportsProps> = ({
                             <thead className="bg-gray-50">
                                 <tr>
                                     <th className="py-2 px-3 text-left">No</th>
-                                    <th className="py-2 px-3 text-left">Tanggal</th>
-                                    <th className="py-2 px-3 text-left">No. Nota</th>
-                                    <th className="py-2 px-3 text-left">Pelanggan</th>
+                                    <SortableHeader label="Tanggal" sortKey="tanggal" />
+                                    <SortableHeader label="No. Nota" sortKey="noNota" />
+                                    <SortableHeader label="Pelanggan" sortKey="pelanggan" />
                                     <th className="py-2 px-3 text-left">Deskripsi</th>
                                     <th className="py-2 px-3 text-left">Bahan</th>
                                     <th className="py-2 px-3 text-center">P</th>
                                     <th className="py-2 px-3 text-center">L</th>
                                     <th className="py-2 px-3 text-center">Qty</th>
-                                    <th className="py-2 px-3 text-right">Total</th>
-                                    <th className="py-2 px-3 text-left">Status</th>
+                                    <SortableHeader label="Total" sortKey="total" className="text-right" />
+                                    <SortableHeader label="Status" sortKey="status" />
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
@@ -752,7 +770,7 @@ const Reports: React.FC<ReportsProps> = ({
                         </table>
                     </div>
                      <Pagination
-                        totalItems={allDetailedSalesData.length}
+                        totalItems={sortedDetailedSalesData.length}
                         itemsPerPage={ITEMS_PER_PAGE}
                         currentPage={currentPage}
                         onPageChange={setCurrentPage}

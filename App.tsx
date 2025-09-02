@@ -1,5 +1,11 @@
 
 
+
+
+
+
+
+
 import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -17,7 +23,7 @@ import Payroll from './components/Payroll';
 import Login from './components/Login';
 import { supabase } from './supabaseClient';
 import { type Session } from '@supabase/supabase-js';
-import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod } from './types';
+import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData } from './types';
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
 
 console.log("Build: Script is being parsed and component is about to be created.");
@@ -462,11 +468,48 @@ const App: React.FC = () => {
   }, [noteCounter]);
 
   const handleUpdateOrder = useCallback(async (updatedOrder: SavedOrder) => {
-      const { data, error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id).select().single();
-      if (error || !data) { alert(`Gagal update order: ${error?.message}`); return; }
-      setAllOrders(prev => prev.map(o => o.id === data.id ? data : o));
-      setUnprocessedOrders(prev => prev.map(o => o.id === data.id ? data : o));
-  }, []);
+      // First, update the order itself
+      const { data: updatedOrderData, error: orderError } = await supabase
+        .from('orders')
+        .update(updatedOrder)
+        .eq('id', updatedOrder.id)
+        .select()
+        .single();
+      
+      if (orderError || !updatedOrderData) { 
+        alert(`Gagal update order: ${orderError?.message}`); 
+        return; 
+      }
+
+      // Now, check if a corresponding receivable exists and update its amount and status to sync.
+      const existingReceivable = receivables.find(r => r.id === updatedOrder.id);
+      if (existingReceivable) {
+        // Calculate total amount paid for this receivable.
+        const totalPaid = existingReceivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+        const discount = existingReceivable.discount || 0;
+        
+        // Determine the new payment status based on the updated price.
+        const newPaymentStatus: PaymentStatus = (totalPaid + discount >= updatedOrder.totalPrice) ? 'Lunas' : 'Belum Lunas';
+
+        // Prepare the payload to update the receivable.
+        const updatePayload = {
+            amount: updatedOrder.totalPrice,
+            paymentStatus: newPaymentStatus,
+        };
+
+        const { error: receivableError } = await supabase
+            .from('receivables')
+            .update(updatePayload)
+            .eq('id', updatedOrder.id);
+        
+        if (receivableError) {
+            alert(`Order berhasil diupdate, tetapi gagal sinkronisasi harga & status ke data pembayaran: ${receivableError.message}`);
+        }
+      }
+      
+      // The real-time subscription will handle updating the local state automatically by calling fetchAllData().
+      
+  }, [receivables]);
 
   const handleProcessOrder = useCallback(async (orderId: string) => {
     const existingReceivable = receivables.find(r => r.id === orderId);
@@ -514,9 +557,25 @@ const App: React.FC = () => {
     }
   }, []);
   
-  const handleProcessPayment = useCallback(async (orderId: string, paymentDetails: Payment, newDiscount?: number) => {
+  const handleProcessPayment = useCallback(async (orderId: string, paymentDetails: Payment, newDiscount?: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => {
     const receivable = receivables.find(r => r.id === orderId);
     if (!receivable) return;
+    
+    // Use the passed newTotalAmount if available, otherwise stick to the existing amount.
+    const finalTotalAmount = newTotalAmount !== undefined ? newTotalAmount : receivable.amount;
+    
+    // If there are updated items, sync the main order first.
+    if (updatedItems) {
+        const { error: orderUpdateError } = await supabase
+            .from('orders')
+            .update({ orderItems: updatedItems, totalPrice: finalTotalAmount })
+            .eq('id', orderId);
+
+        if (orderUpdateError) {
+            alert(`Gagal memperbarui detail order: ${orderUpdateError.message}`);
+            return; // Stop if the main order sync fails.
+        }
+    }
 
     const existingPayments = receivable.payments || [];
     const updatedPayments = [...existingPayments, paymentDetails];
@@ -525,11 +584,12 @@ const App: React.FC = () => {
     const discount = newDiscount !== undefined ? newDiscount : (receivable.discount || 0);
     
     let newPaymentStatus: PaymentStatus = receivable.paymentStatus;
-    if (totalPaid + discount >= receivable.amount) {
+    if (totalPaid + discount >= finalTotalAmount) {
         newPaymentStatus = 'Lunas';
     }
     
-    const updatePayload: { payments: Payment[]; discount?: number; paymentStatus: PaymentStatus } = {
+    const updatePayload: any = {
+        amount: finalTotalAmount, // Sync amount in receivable to the correct total.
         payments: updatedPayments,
         paymentStatus: newPaymentStatus,
     };
@@ -544,23 +604,39 @@ const App: React.FC = () => {
     // State updates will be handled by real-time subscription.
   }, [receivables]);
   
-  const handlePayUnprocessedOrder = useCallback(async (orderId: string, paymentDetails: Payment, newDiscount: number) => {
+  const handlePayUnprocessedOrder = useCallback(async (orderId: string, paymentDetails: Payment, newDiscount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => {
     const order = allOrders.find(o => o.id === orderId);
     if (!order) {
         alert('Order tidak ditemukan!');
         return;
     }
 
+    // Use the passed newTotalAmount if available, otherwise stick to the existing order price.
+    const finalTotalAmount = newTotalAmount !== undefined ? newTotalAmount : order.totalPrice;
+    
+    // If there are updated items, sync the main order first.
+    if (updatedItems) {
+        const { error: orderUpdateError } = await supabase
+            .from('orders')
+            .update({ orderItems: updatedItems, totalPrice: finalTotalAmount })
+            .eq('id', orderId);
+
+        if (orderUpdateError) {
+            alert(`Gagal memperbarui detail order: ${orderUpdateError.message}`);
+            return;
+        }
+    }
+    
     const totalPaid = paymentDetails.amount;
     let newPaymentStatus: PaymentStatus = 'Belum Lunas';
-    if (totalPaid + newDiscount >= order.totalPrice) {
+    if (totalPaid + newDiscount >= finalTotalAmount) {
         newPaymentStatus = 'Lunas';
     }
 
     const newReceivable: ReceivableItem = {
         id: order.id,
         customer: order.customer,
-        amount: order.totalPrice,
+        amount: finalTotalAmount,
         due: order.orderDate,
         paymentStatus: newPaymentStatus,
         productionStatus: 'Dalam Antrian',
@@ -580,7 +656,9 @@ const App: React.FC = () => {
     if (!method) return;
 
     const receivableIds = new Set(receivables.map(r => r.id));
-    const operations: Promise<any>[] = [];
+    // FIX: Changed type from Promise<any>[] to any[] because Supabase query builders are "thenable" but not full Promises,
+    // causing a TypeScript error. Promise.all can handle an array of thenables.
+    const operations: any[] = [];
 
     orderIds.forEach(id => {
         if (receivableIds.has(id)) {
@@ -590,7 +668,6 @@ const App: React.FC = () => {
             if (remainingAmount > 0) {
                 const newPayment: Payment = { amount: remainingAmount, date: paymentDate, methodId: method.id, methodName: method.name };
                 const updatedPayments = [...(receivable.payments || []), newPayment];
-                // FIX: The Supabase update builder must be executed to return a promise. Adding .select() makes it a promise-like object suitable for Promise.all.
                 operations.push(supabase.from('receivables').update({ payments: updatedPayments, paymentStatus: 'Lunas' }).eq('id', id).select());
             }
         } else {
@@ -602,7 +679,6 @@ const App: React.FC = () => {
                     due: order.orderDate, paymentStatus: 'Lunas', productionStatus: 'Dalam Antrian',
                     payments: [payment], discount: 0,
                 };
-                // FIX: The Supabase insert builder must be executed to return a promise. Adding .select() makes it a promise-like object suitable for Promise.all.
                 operations.push(supabase.from('receivables').insert(newReceivable).select());
             }
         }

@@ -50,7 +50,11 @@ const OrderListModal: React.FC<{
   orders: CardData[];
   allOrders: SavedOrder[];
   onClose: () => void;
-}> = ({ title, orders, allOrders, onClose }) => {
+  onEdit: (order: SavedOrder) => void;
+  onCopy: (order: SavedOrder) => void;
+  onPrintSPK: (order: SavedOrder) => void;
+  onDelete: (orderId: string) => void;
+}> = ({ title, orders, allOrders, onClose, onEdit, onCopy, onPrintSPK, onDelete }) => {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4" onClick={onClose}>
       <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -61,6 +65,9 @@ const OrderListModal: React.FC<{
         <div className="overflow-y-auto space-y-3 pr-2">
           {orders.length > 0 ? (
             orders.map(orderCard => {
+              const fullOrder = allOrders.find(o => o.id === orderCard.id);
+              if (!fullOrder) return null;
+
               return (
                 <div key={orderCard.id} className="bg-gray-50 p-3 rounded-md border">
                   <div className="flex justify-between items-center mb-1">
@@ -71,6 +78,12 @@ const OrderListModal: React.FC<{
                     {orderCard.details.split('\n').map((detail, idx) => (
                       <p key={idx} className="truncate">{detail}</p>
                     ))}
+                  </div>
+                  <div className="flex items-center justify-end space-x-2 mt-2 border-t pt-2">
+                      <button onClick={() => { onEdit(fullOrder); onClose(); }} className="p-2 text-gray-500 hover:text-blue-600" title="Edit"><PencilIcon className="h-4 w-4" /></button>
+                      <button onClick={() => onCopy(fullOrder)} className="p-2 text-gray-500 hover:text-green-600" title="Salin Info"><ClipboardIcon className="h-4 w-4" /></button>
+                      <button onClick={() => onPrintSPK(fullOrder)} className="p-2 text-gray-500 hover:text-gray-800" title="Cetak SPK"><PrinterIcon className="h-4 w-4" /></button>
+                      <button onClick={() => onDelete(fullOrder.id)} className="p-2 text-gray-500 hover:text-red-600" title="Hapus"><TrashIcon className="h-4 w-4" /></button>
                   </div>
                 </div>
               );
@@ -186,6 +199,10 @@ const Sales: React.FC<SalesProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotaSettingsOpen, setIsNotaSettingsOpen] = useState(false);
 
+  // State for customer combobox
+  const [customerInputValue, setCustomerInputValue] = useState('');
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
+
   const today = new Date().toISOString().substring(0, 10);
   
   const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
@@ -243,6 +260,42 @@ const Sales: React.FC<SalesProps> = ({
       order.customer.toLowerCase().includes(lowerCaseQuery)
     );
   }, [unprocessedOrders, searchQuery]);
+  
+  // --- Customer Combobox Logic ---
+  const filteredCustomerList = useMemo(() => {
+    if (!customerInputValue) {
+        return [];
+    }
+    const lowerCaseQuery = customerInputValue.toLowerCase();
+    return customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery));
+  }, [customerInputValue, customers]);
+
+  const handleCustomerInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomerInputValue(e.target.value);
+    setIsCustomerDropdownOpen(true);
+  };
+
+  const handleCustomerSelect = (selectedCustomerName: string) => {
+    setCustomer(selectedCustomerName);
+    setCustomerInputValue(selectedCustomerName);
+    setIsCustomerDropdownOpen(false);
+  };
+
+  const handleCustomerInputFocus = () => {
+    if (customerInputValue) {
+        setIsCustomerDropdownOpen(true);
+    }
+  };
+
+  const handleCustomerBlur = () => {
+    // Timeout to allow onMouseDown to fire before closing dropdown
+    setTimeout(() => {
+      setIsCustomerDropdownOpen(false);
+      // Snap back to the officially selected customer if the input is invalid
+      setCustomerInputValue(customer);
+    }, 150);
+  };
+  // --- End Customer Combobox Logic ---
 
   useEffect(() => {
     const calculateTotal = () => {
@@ -283,8 +336,9 @@ const Sales: React.FC<SalesProps> = ({
             priceMultiplier = length * width;
         }
         
-        const baseItemPrice = materialPrice + finishingPrice;
-        total += (baseItemPrice * priceMultiplier) * item.qty;
+        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+        const itemFinishingTotal = finishingPrice * item.qty; // Finishing price is always per item quantity, not affected by area.
+        total += itemMaterialTotal + itemFinishingTotal;
       });
 
       const roundedTotal = roundUpToNearest(total, ROUNDING_AMOUNT);
@@ -346,6 +400,7 @@ const Sales: React.FC<SalesProps> = ({
   const resetForm = () => {
     setOrderItems(getInitialState().orderItems);
     setCustomer(getInitialState().customer);
+    setCustomerInputValue(getInitialState().customer);
     setOrderDate(getInitialState().orderDate);
     setEditingOrderId(null);
   };
@@ -406,6 +461,7 @@ const Sales: React.FC<SalesProps> = ({
   const handleEdit = (order: SavedOrder) => {
       setEditingOrderId(order.id);
       setCustomer(order.customer);
+      setCustomerInputValue(order.customer);
       setOrderDate(order.orderDate);
       setOrderItems(order.orderItems);
   };
@@ -586,6 +642,10 @@ const Sales: React.FC<SalesProps> = ({
               orders={modalData.orders} 
               onClose={() => setModalData(null)}
               allOrders={allOrders}
+              onEdit={handleEdit}
+              onCopy={handleCopy}
+              onPrintSPK={handlePrintSPK}
+              onDelete={handleDelete}
           />
       )}
        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -596,6 +656,7 @@ const Sales: React.FC<SalesProps> = ({
             onClick={() => {
                 const ordersToday = allOrders
                     .filter(o => o.orderDate === today)
+                    .sort((a, b) => b.id.localeCompare(a.id)) // Sort descending by ID (nota number)
                     .map(o => ({ id: o.id, customer: o.customer, details: o.details }));
                 setModalData({ title: "Daftar Order Hari Ini", orders: ordersToday });
             }}
@@ -643,11 +704,34 @@ const Sales: React.FC<SalesProps> = ({
                 <input type="date" id="order-date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" />
               </div>
               <div>
-                <label htmlFor="customer" className="block text-sm font-medium">Pelanggan</label>
-                <select id="customer" value={customer} onChange={(e) => setCustomer(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md" required>
-                  <option value="" disabled>Pilih Pelanggan</option>
-                  {customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+                <label htmlFor="customer-input" className="block text-sm font-medium">Pelanggan</label>
+                <div className="relative mt-1">
+                    <input
+                        id="customer-input"
+                        type="text"
+                        value={customerInputValue}
+                        onChange={handleCustomerInputChange}
+                        onFocus={handleCustomerInputFocus}
+                        onBlur={handleCustomerBlur}
+                        className="w-full p-2 border rounded-md"
+                        required
+                        autoComplete="off"
+                        placeholder="Ketik untuk mencari pelanggan..."
+                    />
+                    {isCustomerDropdownOpen && filteredCustomerList.length > 0 && (
+                        <ul className="absolute z-20 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+                            {filteredCustomerList.map(c => (
+                                <li
+                                    key={c.id}
+                                    className="px-3 py-2 cursor-pointer hover:bg-pink-100"
+                                    onMouseDown={() => handleCustomerSelect(c.name)}
+                                >
+                                    {c.name}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
               </div>
             </div>
             {orderItems.map((item, index) => {

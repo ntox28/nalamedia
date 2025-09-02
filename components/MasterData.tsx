@@ -473,7 +473,7 @@ const MasterData: React.FC<MasterDataProps> = ({
   const { paginatedData, totalItems } = useMemo(() => {
     const lowerCaseQuery = searchQuery.toLowerCase();
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    let data = [];
+    let data: { name: string, [key: string]: any }[] = [];
 
     switch (activeTab) {
         case 'products':
@@ -495,6 +495,9 @@ const MasterData: React.FC<MasterDataProps> = ({
             data = employees.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.contact.toLowerCase().includes(lowerCaseQuery));
             break;
     }
+
+    // Sort the filtered data alphabetically by name
+    data.sort((a, b) => a.name.localeCompare(b.name, 'id-ID', { sensitivity: 'base' }));
 
     return {
       paginatedData: data.slice(startIndex, startIndex + ITEMS_PER_PAGE),

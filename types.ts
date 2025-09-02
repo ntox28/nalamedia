@@ -1,4 +1,5 @@
 
+
 import type React from 'react';
 
 export type MenuKey =
@@ -115,6 +116,7 @@ export interface OrderItemData {
   length: string;
   width: string;
   qty: number;
+  customPrice?: number; // Field baru untuk harga kustom
 }
 
 // Tipe data untuk order yang disimpan di halaman penjualan (sebelum diproses)

@@ -135,7 +135,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
                             orderId: receivable.id,
                             customer: receivable.customer,
                             description: order?.details.split('\n')[0] || 'N/A',
-                            // FIX: The 'Payment' type does not have a 'source' property. Using 'methodName' instead.
                             source: payment.methodName,
                             amount: payment.amount,
                         });

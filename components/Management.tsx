@@ -389,8 +389,9 @@ const EditOrderModal: React.FC<{
                     const width = parseFloat(item.width) || 0;
                     priceMultiplier = length * width;
                 }
-                const baseItemPrice = materialPrice + finishingPrice;
-                total += (baseItemPrice * priceMultiplier) * item.qty;
+                const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+                const itemFinishingTotal = finishingPrice * item.qty; // Finishing price is always per item quantity, not affected by area.
+                total += itemMaterialTotal + itemFinishingTotal;
             });
             const roundedTotal = roundUpToNearest(total, ROUNDING_AMOUNT);
             setTotalPrice(roundedTotal);
@@ -492,8 +493,8 @@ const EditOrderModal: React.FC<{
                             </div>
                             <div><label className="block text-sm font-medium">Deskripsi</label><textarea value={item.description} onChange={(e) => handleItemChange(item.id, 'description', e.target.value)} rows={2} className="mt-1 w-full p-2 border rounded-md"></textarea></div>
                             <div className="grid grid-cols-3 gap-4">
-                                <div><label className="block text-sm font-medium">Panjang (m)</label><input type="number" value={item.length} onChange={(e) => handleItemChange(item.id, 'length', e.target.value)} className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.1" min="0" disabled={!isAreaBased}/></div>
-                                <div><label className="block text-sm font-medium">Lebar (m)</label><input type="number" value={item.width} onChange={(e) => handleItemChange(item.id, 'width', e.target.value)} className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.1" min="0" disabled={!isAreaBased}/></div>
+                                <div><label className="block text-sm font-medium">Panjang (m)</label><input type="number" value={item.length} onChange={(e) => handleItemChange(item.id, 'length', e.target.value)} className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.01" min="0" disabled={!isAreaBased}/></div>
+                                <div><label className="block text-sm font-medium">Lebar (m)</label><input type="number" value={item.width} onChange={(e) => handleItemChange(item.id, 'width', e.target.value)} className={`mt-1 w-full p-2 border rounded-md ${!isAreaBased && 'bg-gray-100'}`} step="0.01" min="0" disabled={!isAreaBased}/></div>
                                 <div><label className="block text-sm font-medium">Qty</label><input type="number" value={item.qty} onChange={(e) => handleItemChange(item.id, 'qty', parseInt(e.target.value, 10) || 1)} className="mt-1 w-full p-2 border rounded-md" min="1" /></div>
                             </div>
                         </div>
@@ -641,6 +642,7 @@ const Management: React.FC<ManagementProps> = ({
     const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
     const [searchQuery, setSearchQuery] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
+    const [sortConfig, setSortConfig] = useState<{ key: string; order: 'asc' | 'desc' } | null>(null);
 
     const [editingOrder, setEditingOrder] = useState<SavedOrder | null>(null);
     const [editingProduct, setEditingProduct] = useState<ProductData | null>(null);
@@ -663,12 +665,20 @@ const Management: React.FC<ManagementProps> = ({
     useEffect(() => {
         setSearchQuery('');
         setCurrentPage(1);
+        setSortConfig(null);
     }, [activeTab]);
     
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery]);
+    }, [searchQuery, sortConfig]);
 
+    const requestSort = (key: string) => {
+        let order: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.order === 'asc') {
+            order = 'desc';
+        }
+        setSortConfig({ key, order });
+    };
 
     // --- Handlers ---
     const handleSaveOrder = (updatedOrder: SavedOrder) => {
@@ -768,74 +778,81 @@ const Management: React.FC<ManagementProps> = ({
         let data: any[] = [];
 
         switch (activeTab) {
-            case 'penjualan':
-                data = [...allOrders].sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime())
-                    .filter(order =>
-                        order.id.toLowerCase().includes(lowerCaseQuery) ||
-                        order.customer.toLowerCase().includes(lowerCaseQuery) ||
-                        order.details.toLowerCase().includes(lowerCaseQuery)
-                    );
-                break;
-            case 'produk':
-                data = products.filter(p => p.name.toLowerCase().includes(lowerCaseQuery) || p.category.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'stok':
-                data = inventory.filter(i => i.name.toLowerCase().includes(lowerCaseQuery) || i.sku.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'kategori':
-                data = categories.filter(c => c.name.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'finishing':
-                data = finishings.filter(f => f.name.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'pelanggan':
-                data = customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery) || c.contact.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'supplier':
-                data = suppliers.filter(s => s.name.toLowerCase().includes(lowerCaseQuery) || s.contactPerson.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'pengeluaran':
-                data = expenses.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.category.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'karyawan':
-                data = employees.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.contact.toLowerCase().includes(lowerCaseQuery));
-                break;
-            case 'gaji':
-                data = salaries.filter(s => employees.find(e => e.id === s.employeeId)?.name.toLowerCase().includes(lowerCaseQuery));
-                break;
+            case 'penjualan': data = [...allOrders].filter(order => order.id.toLowerCase().includes(lowerCaseQuery) || order.customer.toLowerCase().includes(lowerCaseQuery) || order.details.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'produk': data = products.filter(p => p.name.toLowerCase().includes(lowerCaseQuery) || p.category.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'stok': data = inventory.filter(i => i.name.toLowerCase().includes(lowerCaseQuery) || i.sku.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'kategori': data = categories.filter(c => c.name.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'finishing': data = finishings.filter(f => f.name.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'pelanggan': data = customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery) || c.contact.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'supplier': data = suppliers.filter(s => s.name.toLowerCase().includes(lowerCaseQuery) || s.contactPerson.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'pengeluaran': data = expenses.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.category.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'karyawan': data = employees.filter(e => e.name.toLowerCase().includes(lowerCaseQuery) || e.contact.toLowerCase().includes(lowerCaseQuery)); break;
+            case 'gaji': data = salaries.filter(s => employees.find(e => e.id === s.employeeId)?.name.toLowerCase().includes(lowerCaseQuery)); break;
+        }
+        
+        if (sortConfig) {
+            data.sort((a, b) => {
+                let aValue: any; let bValue: any;
+                if (activeTab === 'gaji' && sortConfig.key === 'employeeName') {
+                    aValue = employees.find(e => e.id === a.employeeId)?.name ?? '';
+                    bValue = employees.find(e => e.id === b.employeeId)?.name ?? '';
+                } else {
+                    aValue = a[sortConfig.key]; bValue = b[sortConfig.key];
+                }
+                if (aValue == null || bValue == null) return aValue == null ? 1 : -1;
+                const order = sortConfig.order === 'asc' ? 1 : -1;
+                if (typeof aValue === 'number' && typeof bValue === 'number') return (aValue - bValue) * order;
+                return String(aValue).localeCompare(String(bValue), 'id-ID', { numeric: true }) * order;
+            });
+        } else if (activeTab === 'penjualan') {
+            data.sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
         }
 
+
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        return {
-            paginatedData: data.slice(startIndex, startIndex + ITEMS_PER_PAGE),
-            totalItems: data.length,
-        };
-    }, [activeTab, searchQuery, currentPage, allOrders, products, inventory, categories, finishings, customers, suppliers, expenses, employees, salaries]);
+        return { paginatedData: data.slice(startIndex, startIndex + ITEMS_PER_PAGE), totalItems: data.length };
+    }, [activeTab, searchQuery, currentPage, sortConfig, allOrders, products, inventory, categories, finishings, customers, suppliers, expenses, employees, salaries]);
+    
+    const SortableHeader: React.FC<{ label: string; sortKey: string; className?: string; }> = ({ label, sortKey, className }) => {
+        const isSorted = sortConfig?.key === sortKey;
+        const sortIcon = isSorted ? (sortConfig.order === 'asc' ? '▲' : '▼') : '↕';
+        const iconColor = isSorted ? 'text-gray-800' : 'text-gray-300';
+    
+        return (
+            <th className={`py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none ${className || ''}`} onClick={() => requestSort(sortKey)}>
+                <div className="flex items-center">
+                    <span>{label}</span>
+                    <span className={`ml-2 text-xs ${iconColor}`}>{sortIcon}</span>
+                </div>
+            </th>
+        );
+    };
 
     const renderContent = () => {
+        const NonSortableHeader: React.FC<{ label: string }> = ({ label }) => <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</th>;
         switch (activeTab) {
             case 'penjualan':
                 return (
-                     <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">No. Nota</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Pelanggan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Detail</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Total</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SavedOrder[]).map(order => (<tr key={order.id}><td className="py-4 px-4 whitespace-nowrap text-sm font-medium">{order.id}</td><td className="py-4 px-4 whitespace-nowrap text-sm">{order.customer}</td><td className="py-4 px-4 text-sm max-w-sm truncate" title={order.details}>{order.details}</td><td className="py-4 px-4 whitespace-nowrap text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(order.totalPrice)}</td><ActionButtons onEdit={() => setEditingOrder(order)} onDelete={() => handleDeleteOrder(order.id)} /></tr>))}</tbody></table>
+                     <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="No. Nota" sortKey="id" /><SortableHeader label="Pelanggan" sortKey="customer" /><SortableHeader label="Detail" sortKey="details" /><SortableHeader label="Total" sortKey="totalPrice" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SavedOrder[]).map(order => (<tr key={order.id}><td className="py-4 px-4 whitespace-nowrap text-sm font-medium">{order.id}</td><td className="py-4 px-4 whitespace-nowrap text-sm">{order.customer}</td><td className="py-4 px-4 text-sm max-w-sm truncate" title={order.details}>{order.details}</td><td className="py-4 px-4 whitespace-nowrap text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(order.totalPrice)}</td><ActionButtons onEdit={() => setEditingOrder(order)} onDelete={() => handleDeleteOrder(order.id)} /></tr>))}</tbody></table>
                 );
             case 'produk':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Kategori</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Harga</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ProductData[]).map(p => (<tr key={p.id}><td className="py-4 px-4 text-sm font-medium">{p.name}</td><td className="py-4 px-4 text-sm">{p.category}</td><td className="py-4 px-4 text-xs">{`${p.price.endCustomer/1000}k / ${p.price.retail/1000}k / ${p.price.grosir/1000}k / ...`}</td><ActionButtons onEdit={() => setEditingProduct(p)} onDelete={() => handleDeleteItem('produk', p.id, p.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kategori" sortKey="category" /><NonSortableHeader label="Harga" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ProductData[]).map(p => (<tr key={p.id}><td className="py-4 px-4 text-sm font-medium">{p.name}</td><td className="py-4 px-4 text-sm">{p.category}</td><td className="py-4 px-4 text-xs">{`${p.price.endCustomer/1000}k / ${p.price.retail/1000}k / ${p.price.grosir/1000}k / ...`}</td><ActionButtons onEdit={() => setEditingProduct(p)} onDelete={() => handleDeleteItem('produk', p.id, p.name)} /></tr>))}</tbody></table>;
             case 'stok':
-                return <> <div className="flex justify-end mb-4"><button onClick={() => setIsAddingInventory(true)} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Stok</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">SKU</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Stok</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as InventoryItem[]).map(i => (<tr key={i.id}><td className="py-4 px-4 text-sm font-medium">{i.name}</td><td className="py-4 px-4 text-sm">{i.sku}</td><td className="py-4 px-4 text-sm">{i.stock} {i.unit}</td><ActionButtons onEdit={() => setEditingInventory(i)} onDelete={() => handleDeleteItem('stok', i.id, i.name)} /></tr>))}</tbody></table></>;
+                return <> <div className="flex justify-end mb-4"><button onClick={() => setIsAddingInventory(true)} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Stok</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="SKU" sortKey="sku" /><SortableHeader label="Stok" sortKey="stock" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as InventoryItem[]).map(i => (<tr key={i.id}><td className="py-4 px-4 text-sm font-medium">{i.name}</td><td className="py-4 px-4 text-sm">{i.sku}</td><td className="py-4 px-4 text-sm">{i.stock} {i.unit}</td><ActionButtons onEdit={() => setEditingInventory(i)} onDelete={() => handleDeleteItem('stok', i.id, i.name)} /></tr>))}</tbody></table></>;
             case 'kategori':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Tipe Satuan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as CategoryData[]).map(c => (<tr key={c.id}><td className="py-4 px-4 text-sm font-medium">{c.name}</td><td className="py-4 px-4 text-sm">{c.unitType}</td><ActionButtons onEdit={() => setEditingCategory(c)} onDelete={() => handleDeleteItem('kategori', c.id, c.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Tipe Satuan" sortKey="unitType" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as CategoryData[]).map(c => (<tr key={c.id}><td className="py-4 px-4 text-sm font-medium">{c.name}</td><td className="py-4 px-4 text-sm">{c.unitType}</td><ActionButtons onEdit={() => setEditingCategory(c)} onDelete={() => handleDeleteItem('kategori', c.id, c.name)} /></tr>))}</tbody></table>;
             case 'finishing':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Harga</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as FinishingData[]).map(f => (<tr key={f.id}><td className="py-4 px-4 text-sm font-medium">{f.name}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(f.price)}</td><ActionButtons onEdit={() => setEditingFinishing(f)} onDelete={() => handleDeleteItem('finishing', f.id, f.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Harga" sortKey="price" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as FinishingData[]).map(f => (<tr key={f.id}><td className="py-4 px-4 text-sm font-medium">{f.name}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(f.price)}</td><ActionButtons onEdit={() => setEditingFinishing(f)} onDelete={() => handleDeleteItem('finishing', f.id, f.name)} /></tr>))}</tbody></table>;
             case 'pelanggan':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Kontak</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Level</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as CustomerData[]).map(c => (<tr key={c.id}><td className="py-4 px-4 text-sm font-medium">{c.name}</td><td className="py-4 px-4 text-sm">{c.contact}</td><td className="py-4 px-4 text-sm">{c.level}</td><ActionButtons onEdit={() => setEditingCustomer(c)} onDelete={() => handleDeleteItem('pelanggan', c.id, c.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kontak" sortKey="contact" /><SortableHeader label="Level" sortKey="level" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as CustomerData[]).map(c => (<tr key={c.id}><td className="py-4 px-4 text-sm font-medium">{c.name}</td><td className="py-4 px-4 text-sm">{c.contact}</td><td className="py-4 px-4 text-sm">{c.level}</td><ActionButtons onEdit={() => setEditingCustomer(c)} onDelete={() => handleDeleteItem('pelanggan', c.id, c.name)} /></tr>))}</tbody></table>;
             case 'supplier':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Narahubung</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Telepon</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SupplierData[]).map(s => (<tr key={s.id}><td className="py-4 px-4 text-sm font-medium">{s.name}</td><td className="py-4 px-4 text-sm">{s.contactPerson}</td><td className="py-4 px-4 text-sm">{s.phone}</td><ActionButtons onEdit={() => setEditingSupplier(s)} onDelete={() => handleDeleteItem('supplier', s.id, s.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Narahubung" sortKey="contactPerson" /><SortableHeader label="Telepon" sortKey="phone" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SupplierData[]).map(s => (<tr key={s.id}><td className="py-4 px-4 text-sm font-medium">{s.name}</td><td className="py-4 px-4 text-sm">{s.contactPerson}</td><td className="py-4 px-4 text-sm">{s.phone}</td><ActionButtons onEdit={() => setEditingSupplier(s)} onDelete={() => handleDeleteItem('supplier', s.id, s.name)} /></tr>))}</tbody></table>;
             case 'pengeluaran':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Kategori</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Jumlah</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ExpenseItem[]).map(e => (<tr key={e.id}><td className="py-4 px-4 text-sm font-medium">{e.name}</td><td className="py-4 px-4 text-sm">{e.category}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(e.amount)}</td><ActionButtons onEdit={() => setEditingExpense(e)} onDelete={() => handleDeleteItem('pengeluaran', e.id, e.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kategori" sortKey="category" /><SortableHeader label="Jumlah" sortKey="amount" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ExpenseItem[]).map(e => (<tr key={e.id}><td className="py-4 px-4 text-sm font-medium">{e.name}</td><td className="py-4 px-4 text-sm">{e.category}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(e.amount)}</td><ActionButtons onEdit={() => setEditingExpense(e)} onDelete={() => handleDeleteItem('pengeluaran', e.id, e.name)} /></tr>))}</tbody></table>;
             case 'karyawan':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Kontak</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Devisi</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as EmployeeData[]).map(e => (<tr key={e.id}><td className="py-4 px-4 text-sm font-medium">{e.name}</td><td className="py-4 px-4 text-sm">{e.contact}</td><td className="py-4 px-4 text-sm">{e.division}</td><ActionButtons onEdit={() => setEditingEmployee(e)} onDelete={() => handleDeleteItem('karyawan', e.id, e.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kontak" sortKey="contact" /><SortableHeader label="Devisi" sortKey="division" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as EmployeeData[]).map(e => (<tr key={e.id}><td className="py-4 px-4 text-sm font-medium">{e.name}</td><td className="py-4 px-4 text-sm">{e.contact}</td><td className="py-4 px-4 text-sm">{e.division}</td><ActionButtons onEdit={() => setEditingEmployee(e)} onDelete={() => handleDeleteItem('karyawan', e.id, e.name)} /></tr>))}</tbody></table>;
             case 'gaji':
-                return <> <div className="flex justify-end mb-4"><button onClick={() => setSalaryModalState({ isOpen: true })} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Gaji</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Karyawan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Regular/Jam</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Lembur/Jam</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SalaryData[]).map(s => { const emp = employees.find(e => e.id === s.employeeId); return (<tr key={s.id}><td className="py-4 px-4 text-sm font-medium">{emp?.name || 'N/A'}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID').format(s.regularRate)}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID').format(s.overtimeRate)}</td><ActionButtons onEdit={() => setSalaryModalState({ isOpen: true, data: s })} onDelete={() => handleDeleteItem('gaji', s.id, emp?.name || `ID ${s.id}`)} /></tr>);})}</tbody></table></>;
+                return <> <div className="flex justify-end mb-4"><button onClick={() => setSalaryModalState({ isOpen: true })} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Gaji</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Karyawan" sortKey="employeeName" /><SortableHeader label="Regular/Jam" sortKey="regularRate" /><SortableHeader label="Lembur/Jam" sortKey="overtimeRate" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SalaryData[]).map(s => { const emp = employees.find(e => e.id === s.employeeId); return (<tr key={s.id}><td className="py-4 px-4 text-sm font-medium">{emp?.name || 'N/A'}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID').format(s.regularRate)}</td><td className="py-4 px-4 text-sm">{new Intl.NumberFormat('id-ID').format(s.overtimeRate)}</td><ActionButtons onEdit={() => setSalaryModalState({ isOpen: true, data: s })} onDelete={() => handleDeleteItem('gaji', s.id, emp?.name || `ID ${s.id}`)} /></tr>);})}</tbody></table></>;
             default: return <div className="text-center py-16 text-gray-500"><p>Pilih tab untuk melihat data.</p></div>;
         }
     };

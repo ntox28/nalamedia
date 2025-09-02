@@ -1,8 +1,11 @@
 
 
+
+
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod } from '../types';
-import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon } from './Icons';
+import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -90,33 +93,19 @@ const PaymentModal: React.FC<{
   categories: CategoryData[];
   paymentMethods: PaymentMethod[];
   onClose: () => void;
-  onConfirmPayment: (orderId: string, paymentDetails: Payment, discountAmount: number) => void;
+  onConfirmPayment: (orderId: string, paymentDetails: Payment, discountAmount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
 }> = ({ order, fullOrder, products, finishings, customers, categories, paymentMethods, onClose, onConfirmPayment }) => {
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [discount, setDiscount] = useState<string>('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
   const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
+  const [editedItems, setEditedItems] = useState<OrderItemData[] | null>(fullOrder?.orderItems || null);
 
   useEffect(() => {
     if (order.discount) {
         setDiscount(order.discount.toString());
     }
   }, [order]);
-  
-  const { totalPaid, totalSetelahDiskon, sisaTagihan } = useMemo(() => {
-    const currentTotalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
-    const currentDiscount = parseFloat(discount) || 0;
-    const currentTotalSetelahDiskon = order.amount - currentDiscount;
-    const currentSisaTagihan = currentTotalSetelahDiskon - currentTotalPaid;
-    return {
-      totalPaid: currentTotalPaid,
-      totalSetelahDiskon: currentTotalSetelahDiskon,
-      sisaTagihan: currentSisaTagihan,
-    };
-  }, [order, discount]);
-
-  const numPaymentAmount = parseFloat(paymentAmount) || 0;
-  const kembalian = numPaymentAmount > sisaTagihan ? numPaymentAmount - sisaTagihan : 0;
   
   const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
     'End Customer': 'endCustomer',
@@ -127,6 +116,11 @@ const PaymentModal: React.FC<{
   };
   
   const calculateItemPrice = (item: OrderItemData): number => {
+    // If a custom price is set, use it immediately.
+    if (item.customPrice !== undefined && item.customPrice !== null) {
+        return item.customPrice;
+    }
+
     const customerData = customers.find(c => c.name === order.customer);
     const customerLevel = customerData ? customerData.level : 'End Customer';
     const priceKey = priceLevelMap[customerLevel];
@@ -151,9 +145,51 @@ const PaymentModal: React.FC<{
         priceMultiplier = length * width;
     }
     
-    const baseItemPrice = materialPrice + finishingPrice;
-    return (baseItemPrice * priceMultiplier) * item.qty;
+    const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+    const itemFinishingTotal = finishingPrice * item.qty;
+    return itemMaterialTotal + itemFinishingTotal;
   };
+  
+  const currentTotalAmount = useMemo(() => {
+    if (!editedItems) return order.amount;
+    const total = editedItems.reduce((sum, item) => sum + calculateItemPrice(item), 0);
+    // Apply rounding
+    return Math.ceil(total / 500) * 500;
+  }, [editedItems, order.customer, products, finishings, customers, categories]);
+
+
+  const { totalPaid, totalSetelahDiskon, sisaTagihan } = useMemo(() => {
+    const currentTotalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+    const currentDiscount = parseFloat(discount) || 0;
+    const currentTotalSetelahDiskon = currentTotalAmount - currentDiscount;
+    const currentSisaTagihan = currentTotalSetelahDiskon - currentTotalPaid;
+    return {
+      totalPaid: currentTotalPaid,
+      totalSetelahDiskon: currentTotalSetelahDiskon,
+      sisaTagihan: currentSisaTagihan,
+    };
+  }, [order, discount, currentTotalAmount]);
+
+  const numPaymentAmount = parseFloat(paymentAmount) || 0;
+  const kembalian = numPaymentAmount > sisaTagihan ? numPaymentAmount - sisaTagihan : 0;
+
+  const handlePriceOverride = (itemId: number) => {
+      const item = editedItems?.find(i => i.id === itemId);
+      if (!item) return;
+
+      const currentPrice = calculateItemPrice(item);
+      const newPriceStr = window.prompt(`Masukkan harga TOTAL baru untuk item ini:\n${item.description}`, currentPrice.toString());
+
+      if (newPriceStr !== null) {
+          const newPrice = parseFloat(newPriceStr);
+          if (!isNaN(newPrice) && newPrice >= 0) {
+              setEditedItems(prev => prev!.map(i => i.id === itemId ? { ...i, customPrice: newPrice } : i));
+          } else {
+              alert('Harga yang dimasukkan tidak valid.');
+          }
+      }
+  };
+
 
   const handleProcessPayment = () => {
       const amountToPay = numPaymentAmount;
@@ -182,15 +218,12 @@ const PaymentModal: React.FC<{
         date: paymentDate,
         methodId: selectedMethod.id,
         methodName: selectedMethod.name,
-      }, finalDiscount);
+      }, finalDiscount, editedItems || undefined, currentTotalAmount);
   };
-
-  const unroundedTotal = fullOrder?.orderItems.reduce((sum, item) => sum + calculateItemPrice(item), 0) || 0;
-  const roundingDifference = order.amount - unroundedTotal;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center border-b pb-3 mb-4">
                 <h3 className="text-xl font-bold text-gray-800">Proses Pembayaran</h3>
                 <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
@@ -215,28 +248,27 @@ const PaymentModal: React.FC<{
                             <thead className="bg-gray-50">
                                 <tr>
                                     <th className="py-2 px-3 text-left font-medium text-gray-600">Deskripsi</th>
-                                    <th className="py-2 px-3 text-left font-medium text-gray-600">Bahan</th>
-                                    <th className="py-2 px-3 text-left font-medium text-gray-600">Ukuran</th>
                                     <th className="py-2 px-3 text-center font-medium text-gray-600">Qty</th>
                                     <th className="py-2 px-3 text-right font-medium text-gray-600">Total</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {fullOrder?.orderItems.map((item, index) => {
+                                {editedItems?.map((item, index) => {
                                     const product = products.find(p => p.id === item.productId);
-                                    const category = categories.find(c => c.name === product?.category);
-                                    const isArea = category?.unitType === 'Per Luas';
-                                    let itemTotal = calculateItemPrice(item);
-                                    if (fullOrder && index === fullOrder.orderItems.length - 1) {
-                                        itemTotal += roundingDifference;
-                                    }
+                                    const itemTotal = calculateItemPrice(item);
                                     return (
                                         <tr key={item.id}>
-                                            <td className="py-2 px-3">{item.description || '-'}</td>
-                                            <td className="py-2 px-3">{product?.name || 'N/A'}</td>
-                                            <td className="py-2 px-3">{isArea ? `${item.length}x${item.width}` : '-'}</td>
+                                            <td className="py-2 px-3">
+                                                <p className="font-semibold">{item.description || '-'}</p>
+                                                <p className="text-xs text-gray-500">{product?.name || 'N/A'}</p>
+                                            </td>
                                             <td className="py-2 px-3 text-center">{item.qty} Pcs</td>
-                                            <td className="py-2 px-3 text-right font-mono">{new Intl.NumberFormat('id-ID').format(itemTotal)}</td>
+                                            <td className="py-2 px-3 text-right font-mono flex items-center justify-end gap-2">
+                                                <span>{new Intl.NumberFormat('id-ID').format(itemTotal)}</span>
+                                                <button onClick={() => handlePriceOverride(item.id)} title="Ubah Harga Item" className="p-1 text-gray-400 hover:text-blue-600">
+                                                    <PencilIcon className="h-3 w-3" />
+                                                </button>
+                                            </td>
                                         </tr>
                                     );
                                 })}
@@ -265,7 +297,7 @@ const PaymentModal: React.FC<{
                 <div className="border-t pt-4 space-y-2">
                     <div className="flex justify-between text-md">
                         <span className="text-gray-600">Total Tagihan</span>
-                        <span className="font-semibold">{formatCurrency(order.amount)}</span>
+                        <span className="font-semibold">{formatCurrency(currentTotalAmount)}</span>
                     </div>
                     <div className="flex justify-between items-center text-md">
                         <span className="text-gray-600">Diskon (Rp.)</span>
@@ -293,22 +325,32 @@ const PaymentModal: React.FC<{
                 
                 <div className="border-t pt-4">
                     <h4 className="font-semibold text-gray-700 mb-3">Form Input Pembayaran</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                        <div className="md:col-span-1">
                             <label className="block text-sm font-medium text-gray-700">Jumlah Pembayaran</label>
-                            <input 
-                                type="number" 
-                                value={paymentAmount}
-                                onChange={e => setPaymentAmount(e.target.value)}
-                                className="mt-1 w-full p-2 border rounded-md" 
-                                placeholder="0"
-                            />
+                            <div className="flex items-center space-x-2 mt-1">
+                                <input 
+                                    type="number" 
+                                    value={paymentAmount}
+                                    onChange={e => setPaymentAmount(e.target.value)}
+                                    className="w-full p-2 border rounded-md" 
+                                    placeholder="0"
+                                />
+                                <button 
+                                    type="button"
+                                    onClick={() => setPaymentAmount(sisaTagihan > 0 ? sisaTagihan.toString() : '0')}
+                                    className="whitespace-nowrap bg-cyan-500 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-cyan-600 disabled:bg-cyan-300"
+                                    disabled={sisaTagihan <= 0}
+                                >
+                                    LUNAS
+                                </button>
+                            </div>
                         </div>
-                         <div>
+                         <div className="md:col-span-1">
                             <label className="block text-sm font-medium text-gray-700">Tanggal Pembayaran</label>
                             <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" />
                         </div>
-                        <div>
+                        <div className="md:col-span-1">
                             <label className="block text-sm font-medium text-gray-700">Metode Pembayaran</label>
                             <select value={paymentMethodId} onChange={e => setPaymentMethodId(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
                                 {paymentMethods.map(method => (
@@ -553,8 +595,8 @@ interface ReceivablesProps {
   initialCash: number;
   paymentMethods: PaymentMethod[];
   onUpdateInitialCash: (amount: number) => void;
-  onProcessPayment: (orderId: string, paymentDetails: Payment, newDiscount?: number) => void;
-  onPayUnprocessedOrder: (orderId: string, paymentDetails: Payment, newDiscount: number) => void;
+  onProcessPayment: (orderId: string, paymentDetails: Payment, newDiscount?: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
+  onPayUnprocessedOrder: (orderId: string, paymentDetails: Payment, newDiscount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onBulkProcessPayment: (orderIds: string[], paymentDate: string, paymentMethodId: string) => void;
 }
 
@@ -731,11 +773,11 @@ const Receivables: React.FC<ReceivablesProps> = ({
     setSelectedOrder(null);
   };
   
-  const handleConfirmPayment = (orderId: string, paymentDetails: Payment, discountAmount: number) => {
+  const handleConfirmPayment = (orderId: string, paymentDetails: Payment, discountAmount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => {
     if (selectedOrder?.isUnprocessed) {
-      onPayUnprocessedOrder(orderId, paymentDetails, discountAmount);
+      onPayUnprocessedOrder(orderId, paymentDetails, discountAmount, updatedItems, newTotalAmount);
     } else {
-      onProcessPayment(orderId, paymentDetails, discountAmount);
+      onProcessPayment(orderId, paymentDetails, discountAmount, updatedItems, newTotalAmount);
     }
     handleClosePaymentModal();
   };
@@ -818,8 +860,10 @@ const Receivables: React.FC<ReceivablesProps> = ({
             priceMultiplier = length * width;
         }
         
-        const baseItemPrice = materialPrice + finishingPrice;
-        const total = (baseItemPrice * priceMultiplier) * item.qty;
+        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+        const itemFinishingTotal = finishingPrice * item.qty;
+        const total = itemMaterialTotal + itemFinishingTotal;
+
         const perUnit = item.qty > 0 ? total / item.qty : 0;
         return { total, perUnit };
     };
@@ -996,8 +1040,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
             priceMultiplier = length * width;
         }
         
-        const baseItemPrice = materialPrice + finishingPrice;
-        return (baseItemPrice * priceMultiplier) * item.qty;
+        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+        const itemFinishingTotal = finishingPrice * item.qty;
+        return itemMaterialTotal + itemFinishingTotal;
     };
     
     const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer), 0);
@@ -1362,8 +1407,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
             priceMultiplier = length * width;
         }
         
-        const baseItemPrice = materialPrice + finishingPrice;
-        return (baseItemPrice * priceMultiplier) * item.qty;
+        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+        const itemFinishingTotal = finishingPrice * item.qty;
+        return itemMaterialTotal + itemFinishingTotal;
     };
     
     const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer), 0);
