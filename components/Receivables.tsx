@@ -1,11 +1,6 @@
-
-
-
-
-
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod } from '../types';
-import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon } from './Icons';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem } from '../types';
+import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -581,6 +576,116 @@ const SummaryInfoModal: React.FC<{
 };
 // --- END: NEW SUMMARY MODAL ---
 
+// --- START: RECEIVABLES NOTIFICATION POPUP ---
+const ReceivablesNotificationPopup: React.FC<{ 
+    notifications: NotificationItem[];
+    onDismiss: (id: string) => void;
+    onClosePopup: () => void;
+}> = ({ notifications, onDismiss, onClosePopup }) => {
+    
+    const timeAgo = (isoDate: string) => {
+        const seconds = Math.floor((new Date().getTime() - new Date(isoDate).getTime()) / 1000);
+        let interval = seconds / 31536000;
+        if (interval > 1) return Math.floor(interval) + " tahun lalu";
+        interval = seconds / 2592000;
+        if (interval > 1) return Math.floor(interval) + " bulan lalu";
+        interval = seconds / 86400;
+        if (interval > 1) return Math.floor(interval) + " hari lalu";
+        interval = seconds / 3600;
+        if (interval > 1) return Math.floor(interval) + " jam lalu";
+        interval = seconds / 60;
+        if (interval > 1) return Math.floor(interval) + " menit lalu";
+        return "Baru saja";
+    };
+    
+    return (
+    <div 
+        className="absolute top-full right-0 mt-2 w-80 max-w-sm bg-white rounded-lg shadow-lg border z-50"
+        aria-label="Notification Popup"
+    >
+        <div className="p-3 border-b">
+            <h3 className="font-semibold text-gray-800">Notifikasi Piutang</h3>
+        </div>
+        <div className="py-2 max-h-96 overflow-y-auto">
+            {notifications.length > 0 ? (
+                notifications.map(item => (
+                    <div 
+                        key={item.id} 
+                        className="px-3 py-1"
+                    >
+                        <div className={`flex items-start p-2 rounded-md relative group`}>
+                            <div className="flex-shrink-0 mt-1">{item.icon}</div>
+                            <div className="ml-3 flex-1">
+                                <p className="text-sm text-gray-700 leading-tight">{item.text}</p>
+                                <p className="text-xs text-gray-500 mt-1">{timeAgo(item.time)}</p>
+                            </div>
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDismiss(item.id);
+                                }} 
+                                className="absolute top-1 right-1 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity text-lg" 
+                                aria-label="Tutup notifikasi"
+                            >
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+                ))
+            ) : (
+                <div className="text-center py-10 text-gray-500">
+                    <p>Tidak ada notifikasi piutang.</p>
+                </div>
+            )}
+        </div>
+    </div>
+)};
+// --- END: RECEIVABLES NOTIFICATION POPUP ---
+
+const BulkDueDateModal: React.FC<{
+  itemCount: number;
+  onClose: () => void;
+  onConfirm: (newDueDate: string) => void;
+}> = ({ itemCount, onClose, onConfirm }) => {
+    const [newDueDate, setNewDueDate] = useState(new Date().toISOString().substring(0, 10));
+
+    const handleConfirm = () => {
+        onConfirm(newDueDate);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center border-b pb-3 mb-4">
+                    <h3 className="text-xl font-bold text-gray-800">Ubah Jatuh Tempo Massal</h3>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+                </div>
+
+                <div className="space-y-4">
+                    <p>Anda akan mengubah tanggal jatuh tempo untuk <strong>{itemCount} nota</strong> yang belum lunas (sesuai filter).</p>
+                    
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Tanggal Jatuh Tempo Baru</label>
+                        <input 
+                            type="date" 
+                            value={newDueDate} 
+                            onChange={e => setNewDueDate(e.target.value)} 
+                            className="mt-1 w-full p-2 border rounded-md" 
+                        />
+                    </div>
+                </div>
+
+                <div className="border-t pt-4 mt-6 flex justify-end space-x-3">
+                    <button onClick={onClose} className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>
+                    <button onClick={handleConfirm} className="bg-pink-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-pink-700">
+                        Simpan Perubahan
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 interface ReceivablesProps {
   receivables: ReceivableItem[];
@@ -598,6 +703,9 @@ interface ReceivablesProps {
   onProcessPayment: (orderId: string, paymentDetails: Payment, newDiscount?: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onPayUnprocessedOrder: (orderId: string, paymentDetails: Payment, newDiscount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onBulkProcessPayment: (orderIds: string[], paymentDate: string, paymentMethodId: string) => void;
+  onUpdateDueDate: (orderId: string, newDueDate: string) => void;
+  onBulkUpdateDueDate: (orderIds: string[], newDueDate: string) => void;
+  notificationSettings: NotificationSettings;
 }
 
 const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
@@ -611,7 +719,7 @@ const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> =
 
 const Receivables: React.FC<ReceivablesProps> = ({ 
     receivables, unprocessedOrders, allOrders, boardData, products, finishings, customers, categories, expenses, initialCash, paymentMethods,
-    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash 
+    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings
 }) => {
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<DisplayReceivable | null>(null);
@@ -620,12 +728,20 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [isBulkPayModalOpen, setBulkPayModalOpen] = useState(false);
   const [isInitialCashModalOpen, setInitialCashModalOpen] = useState(false);
+  const [isBulkDueDateModalOpen, setBulkDueDateModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [summaryModal, setSummaryModal] = useState<{
     type: 'payments' | 'receivables' | 'expenses' | 'finalCash' | 'initialCashInfo' | null;
     title: string;
   }>({ type: null, title: '' });
+  const [editingDueDateId, setEditingDueDateId] = useState<string | null>(null);
+  const [newDueDate, setNewDueDate] = useState('');
   
+  // States for local notifications
+  const [receivableNotifications, setReceivableNotifications] = useState<NotificationItem[]>([]);
+  const [isNotificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
   // Filter states
   const [filterSearch, setFilterSearch] = useState('');
   const [filterCustomer, setFilterCustomer] = useState('');
@@ -717,9 +833,57 @@ const Receivables: React.FC<ReceivablesProps> = ({
       if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
         setActionsMenu(null);
       }
+      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
+        setNotificationsOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // --- Notification Generation for Receivables ---
+  useEffect(() => {
+    const generateNotifications = () => {
+        const newNotifications: NotificationItem[] = [];
+        const now = new Date();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        receivables.forEach(r => {
+            if (r.paymentStatus === 'Belum Lunas') {
+                const dueDate = new Date(r.due);
+                dueDate.setHours(0, 0, 0, 0);
+                const diffTime = dueDate.getTime() - today.getTime();
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if (notificationSettings.receivableOverdueAlert && diffDays < 0) {
+                     newNotifications.push({
+                        id: `overdue-${r.id}`,
+                        icon: <ExclamationTriangleIcon className="h-5 w-5 text-red-500" />,
+                        text: `Piutang '${r.customer}' (${r.id}) telah jatuh tempo.`,
+                        time: now.toISOString(),
+                        type: 'warning',
+                    });
+                } 
+                else if (notificationSettings.receivableDueSoonAlert && diffDays >= 0 && diffDays <= notificationSettings.receivableDueSoonDays) {
+                    newNotifications.push({
+                        id: `due-soon-${r.id}`,
+                        icon: <CreditCardIcon className="h-5 w-5 text-amber-500" />,
+                        text: `Piutang '${r.customer}' (${r.id}) akan jatuh tempo dalam ${diffDays} hari.`,
+                        time: now.toISOString(),
+                        type: 'info',
+                    });
+                }
+            }
+        });
+        
+        setReceivableNotifications(newNotifications.sort((a,b) => b.time.localeCompare(a.time)));
+    };
+    generateNotifications();
+  }, [receivables, notificationSettings]);
+
+  const handleDismissNotification = useCallback((id: string) => {
+      setReceivableNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
 
@@ -788,6 +952,14 @@ const Receivables: React.FC<ReceivablesProps> = ({
         onBulkProcessPayment(orderIdsToPay, paymentDate, paymentMethodId);
     }
     setBulkPayModalOpen(false);
+  };
+  
+  const handleConfirmBulkDueDateUpdate = (newDueDate: string) => {
+    const orderIdsToUpdate = unpaidFilteredItems.map(o => o.id);
+    if (orderIdsToUpdate.length > 0) {
+        onBulkUpdateDueDate(orderIdsToUpdate, newDueDate);
+    }
+    setBulkDueDateModalOpen(false);
   };
 
   // --- START: Data calculations for Summary Modal ---
@@ -1356,7 +1528,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                     <div style="clear: both; margin-top: 40px; font-size: 9pt;">
                         <hr>
                         <strong>Informasi Pembayaran:</strong><br>
-                        Transfer Bank ke rekening BCA 0154-361801, BRI 6707-01-02-8864-537, atau BPD JATENG 3142-069325 a/n Ariska Prima Diastari.
+                        Transfer Bank ke rekening BCA 0154-361801, BRI 6707-01-02-8864-537, atau BPD JATENG 3142069325 a/n Ariska Prima Diastari.
                     </div>
                 </div>
             </body>
@@ -1690,6 +1862,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
     }
   };
 
+  const handleStartEditDueDate = (item: ReceivableItem) => {
+      setEditingDueDateId(item.id);
+      setNewDueDate(item.due);
+  };
+
+  const handleSaveDueDate = (orderId: string) => {
+      onUpdateDueDate(orderId, newDueDate);
+      setEditingDueDateId(null);
+  };
+
+
   return (
     <>
       {modalData && (
@@ -1777,13 +1960,36 @@ const Receivables: React.FC<ReceivablesProps> = ({
       <div className="bg-white p-6 rounded-xl shadow-md">
         <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold">Daftar Pembayaran / Piutang</h2>
-            <button 
-              onClick={() => setIsFilterVisible(!isFilterVisible)}
-              className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"
-            >
-              <FilterIcon className="h-4 w-4" />
-              <span>Filter</span>
-            </button>
+            <div className="flex items-center space-x-2">
+                <div className="relative" ref={notificationRef}>
+                  <button 
+                    onClick={() => setNotificationsOpen(prev => !prev)}
+                    className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full focus:outline-none"
+                    aria-label="Notifikasi Piutang"
+                    aria-haspopup="true"
+                    aria-expanded={isNotificationsOpen}
+                  >
+                    <BellIcon />
+                    {receivableNotifications.length > 0 && (
+                      <span className="absolute top-0 right-0 h-2.5 w-2.5 mt-1 mr-1 bg-red-500 rounded-full border-2 border-white"></span>
+                    )}
+                  </button>
+                  {isNotificationsOpen && (
+                    <ReceivablesNotificationPopup 
+                      notifications={receivableNotifications} 
+                      onDismiss={handleDismissNotification} 
+                      onClosePopup={() => setNotificationsOpen(false)}
+                    />
+                  )}
+                </div>
+                <button 
+                  onClick={() => setIsFilterVisible(!isFilterVisible)}
+                  className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"
+                >
+                  <FilterIcon className="h-4 w-4" />
+                  <span>Filter</span>
+                </button>
+            </div>
         </div>
 
         {isFilterVisible && (
@@ -1813,10 +2019,20 @@ const Receivables: React.FC<ReceivablesProps> = ({
                         <button 
                             onClick={() => setBulkPayModalOpen(true)}
                             className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 mr-2 disabled:bg-green-300 disabled:cursor-not-allowed"
-                            disabled={unpaidFilteredItems.length === 0}
+                            disabled={!filterCustomer || unpaidFilteredItems.length === 0}
+                            title={!filterCustomer ? 'Pilih pelanggan di filter untuk mengaktifkan' : 'Bayar semua nota yang belum lunas untuk pelanggan ini'}
                         >
-                            Bayar Langsung
+                            Bayar Langsung ({unpaidFilteredItems.length} Nota)
                         </button>
+                        {filterStatus === 'Belum Lunas' && (
+                             <button 
+                                onClick={() => setBulkDueDateModalOpen(true)}
+                                className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 mr-2 disabled:bg-amber-300 disabled:cursor-not-allowed"
+                                disabled={unpaidFilteredItems.length === 0}
+                            >
+                                Ubah Jatuh Tempo ({unpaidFilteredItems.length} Nota)
+                            </button>
+                        )}
                         <button 
                             onClick={handlePrintCustomerReport}
                             className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed"
@@ -1836,67 +2052,100 @@ const Receivables: React.FC<ReceivablesProps> = ({
               <tr>
                 <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">No. Nota</th>
                 <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pelanggan</th>
-                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Order</th>
                 <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Produksi</th>
+                <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jatuh Tempo</th>
+                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Tagihan</th>
                 <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status Bayar</th>
                 <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {paginatedItems.length > 0 ? paginatedItems.map(item => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="py-4 px-4 whitespace-nowrap font-medium text-gray-800">{item.id}</td>
-                  <td className="py-4 px-4 whitespace-nowrap">{item.customer}</td>
-                  <td className="py-4 px-4 whitespace-nowrap">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(item.amount)}</td>
-                  <td className="py-4 px-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getProductionStatusColor(item.productionStatus)}`}>
-                      {item.productionStatus}
-                    </span>
-                  </td>
-                  <td className="py-4 px-4 whitespace-nowrap">
-                     <div className="flex items-center space-x-2">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusColor(item.paymentStatus)}`}>
-                          {item.paymentStatus}
-                        </span>
-                        {item.paymentStatus === 'Belum Lunas' && (
-                            <button onClick={() => handleOpenPaymentModal(item)} className="text-pink-600 hover:text-pink-900 font-semibold text-xs px-2 py-1 rounded-md hover:bg-pink-50">Bayar</button>
-                        )}
-                    </div>
-                  </td>
-                  <td className="py-4 px-4 whitespace-nowrap text-right text-sm font-medium">
-                     <div className="relative inline-block text-left">
-                        <button
-                            type="button"
-                            onClick={() => setActionsMenu(actionsMenu === item.id ? null : item.id)}
-                            className="p-1.5 text-gray-500 rounded-full hover:bg-gray-200 focus:outline-none"
-                            aria-haspopup="true"
-                            aria-expanded={actionsMenu === item.id}
-                        >
-                            <span className="sr-only">Opsi</span>
-                            <EllipsisVerticalIcon className="h-5 w-5" />
-                        </button>
+              {paginatedItems.length > 0 ? paginatedItems.map(item => {
+                const fullOrder = allOrders.find(o => o.id === item.id);
+                const orderDate = fullOrder ? new Date(fullOrder.orderDate).toLocaleDateString('id-ID') : 'N/A';
 
-                        {actionsMenu === item.id && (
-                            <div
-                                ref={actionsMenuRef}
-                                className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10"
-                                role="menu"
-                                aria-orientation="vertical"
-                            >
-                                <div className="py-1" role="none">
-                                    <a href="#" onClick={(e) => { e.preventDefault(); handlePrintReceipt(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Cetak Struk</a>
-                                    <a href="#" onClick={(e) => { e.preventDefault(); handlePrintDotMatrixNota(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Cetak Nota (dot matrix)</a>
-                                    <a href="#" onClick={(e) => { e.preventDefault(); handleSendWhatsApp(item); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Kirim Whatsapp</a>
-                                    <a href="#" onClick={(e) => { e.preventDefault(); handlePreviewInvoice(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Lihat & Cetak Invoice</a>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                  </td>
-                </tr>
-              )) : (
+                return (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="py-4 px-4 whitespace-nowrap font-medium text-gray-800">{item.id}</td>
+                    <td className="py-4 px-4 whitespace-nowrap">{item.customer}</td>
+                    <td className="py-4 px-4 whitespace-nowrap text-sm">{orderDate}</td>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getProductionStatusColor(item.productionStatus)}`}>
+                        {item.productionStatus}
+                      </span>
+                    </td>
+                    <td className="py-4 px-4 whitespace-nowrap text-sm">
+                      {editingDueDateId === item.id ? (
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="date"
+                            value={newDueDate}
+                            onChange={(e) => setNewDueDate(e.target.value)}
+                            className="p-1 border rounded-md"
+                          />
+                          <button onClick={() => handleSaveDueDate(item.id)} className="p-1 text-green-600 hover:bg-green-100 rounded-full"><CheckIcon className="h-4 w-4" /></button>
+                          <button onClick={() => setEditingDueDateId(null)} className="p-1 text-red-600 hover:bg-red-100 rounded-full">&times;</button>
+                        </div>
+                      ) : (
+                        <div className={`flex items-center space-x-2 group ${item.paymentStatus === 'Lunas' ? 'text-gray-400' : ''}`}>
+                          <span className={item.paymentStatus === 'Lunas' ? 'line-through' : ''}>
+                            {new Date(item.due).toLocaleDateString('id-ID')}
+                          </span>
+                          {item.paymentStatus !== 'Lunas' && (
+                            <button onClick={() => handleStartEditDueDate(item)} className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <PencilIcon className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                     <td className="py-4 px-4 whitespace-nowrap text-right font-semibold">{formatCurrency(item.amount)}</td>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                       <div className="flex items-center space-x-2">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getPaymentStatusColor(item.paymentStatus)}`}>
+                            {item.paymentStatus}
+                          </span>
+                          {item.paymentStatus === 'Belum Lunas' && (
+                              <button onClick={() => handleOpenPaymentModal(item)} className="text-pink-600 hover:text-pink-900 font-semibold text-xs px-2 py-1 rounded-md hover:bg-pink-50">Bayar</button>
+                          )}
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 whitespace-nowrap text-right text-sm font-medium">
+                       <div className="relative inline-block text-left">
+                          <button
+                              type="button"
+                              onClick={() => setActionsMenu(actionsMenu === item.id ? null : item.id)}
+                              className="p-1.5 text-gray-500 rounded-full hover:bg-gray-200 focus:outline-none"
+                              aria-haspopup="true"
+                              aria-expanded={actionsMenu === item.id}
+                          >
+                              <span className="sr-only">Opsi</span>
+                              <EllipsisVerticalIcon className="h-5 w-5" />
+                          </button>
+
+                          {actionsMenu === item.id && (
+                              <div
+                                  ref={actionsMenuRef}
+                                  className="origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10"
+                                  role="menu"
+                                  aria-orientation="vertical"
+                              >
+                                  <div className="py-1" role="none">
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handlePrintReceipt(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Cetak Struk</a>
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handlePrintDotMatrixNota(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Cetak Nota (dot matrix)</a>
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handleSendWhatsApp(item); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Kirim Whatsapp</a>
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handlePreviewInvoice(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Lihat & Cetak Invoice</a>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              }) : (
                 <tr>
-                  <td colSpan={6} className="text-center py-10 text-gray-500">Tidak ada data piutang yang cocok dengan filter.</td>
+                  <td colSpan={8} className="text-center py-10 text-gray-500">Tidak ada data piutang yang cocok dengan filter.</td>
                 </tr>
               )}
             </tbody>
@@ -1950,6 +2199,13 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 finalCashBreakdown: finalCashBreakdown,
                 finalCashTotal: finalCash
             }}
+        />
+    )}
+    {isBulkDueDateModalOpen && (
+        <BulkDueDateModal
+            itemCount={unpaidFilteredItems.length}
+            onClose={() => setBulkDueDateModalOpen(false)}
+            onConfirm={handleConfirmBulkDueDateUpdate}
         />
     )}
     </>

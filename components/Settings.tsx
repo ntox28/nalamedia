@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { type Profile, type UserLevel, type MenuPermissions, type NotificationSettings, type StoreInfo, type PaymentMethod } from '../types';
 import { PencilIcon, TrashIcon, PlusCircleIcon, EyeIcon, EyeSlashIcon } from './Icons';
@@ -386,7 +385,7 @@ const NotificationSettingsManager: React.FC<{
 
     return (
         <div className="max-w-3xl">
-             <h3 className="text-lg font-bold text-gray-700 mb-4">Pengaturan Notifikasi</h3>
+             <h3 className="text-lg font-bold text-gray-700 mb-4">Pengaturan Notifikasi & Piutang</h3>
              <div className="space-y-6">
                 
                 <div className="flex justify-between items-center p-4 border rounded-lg">
@@ -447,6 +446,23 @@ const NotificationSettingsManager: React.FC<{
                      <ToggleSwitch name="newOrderInQueueAlert" checked={localSettings.newOrderInQueueAlert} onChange={handleChange} />
                 </div>
 
+                <div className="flex justify-between items-center p-4 border rounded-lg">
+                    <div>
+                        <h4 className="font-semibold text-gray-800">Jatuh Tempo Piutang Otomatis</h4>
+                        <p className="text-sm text-gray-500">Jumlah hari setelah tanggal order untuk jatuh tempo otomatis.</p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                         <input
+                            type="number"
+                            name="defaultDueDateDays"
+                            value={localSettings.defaultDueDateDays ?? 7}
+                            onChange={handleChange}
+                            className="w-20 p-1 border rounded-md text-sm text-center"
+                        />
+                        <span className="text-sm text-gray-600">hari</span>
+                    </div>
+                </div>
+
              </div>
              <div className="flex justify-end mt-8 border-t pt-4">
                 <button
@@ -480,7 +496,7 @@ const TABS_ADMIN = [
     { key: 'storeInfo', label: 'Informasi Toko' },
     { key: 'paymentMethods', label: 'Metode Pembayaran' },
     { key: 'userManagement', label: 'Manajemen Pengguna & Akses' },
-    { key: 'notifications', label: 'Notifikasi' },
+    { key: 'notifications', label: 'Notifikasi & Piutang' },
 ];
 
 const TABS_USER = [

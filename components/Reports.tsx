@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
-import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon } from './Icons';
+import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon } from './Icons';
 import { exportToExcel } from './reportUtils';
 import Pagination from './Pagination';
 
@@ -222,6 +222,9 @@ const Reports: React.FC<ReportsProps> = ({
     const [currentPage, setCurrentPage] = useState(1);
     const [sortConfig, setSortConfig] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'noNota', order: 'desc' });
 
+    const [isCustomerReportFilterVisible, setIsCustomerReportFilterVisible] = useState(false);
+    const [filterCustomer, setFilterCustomer] = useState('');
+
 
     const { firstDay, lastDay } = getMonthDateRange();
     const [filterStartDate, setFilterStartDate] = useState(firstDay);
@@ -232,6 +235,11 @@ const Reports: React.FC<ReportsProps> = ({
         return Array.from(new Set(orderYears)).sort((a, b) => b - a);
     }, [allOrders]);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+     const uniqueCustomers = useMemo(() => {
+        const customerSet = new Set(allOrders.map(o => o.customer));
+        return Array.from(customerSet).sort();
+    }, [allOrders]);
     
     useEffect(() => {
         if (years.length > 0 && !years.includes(selectedYear)) {
@@ -247,6 +255,8 @@ const Reports: React.FC<ReportsProps> = ({
     
     useEffect(() => {
         setCurrentPage(1);
+        setFilterCustomer('');
+        setIsCustomerReportFilterVisible(false);
     }, [activeTab, filterStartDate, filterEndDate, selectedYear, sortConfig]);
     
     const requestSort = (key: string) => {
@@ -520,8 +530,12 @@ const Reports: React.FC<ReportsProps> = ({
 
     const filteredSalesData = useMemo(() => {
         return allOrders
-            .filter(order => order.orderDate >= filterStartDate && order.orderDate <= filterEndDate);
-    }, [allOrders, filterStartDate, filterEndDate]);
+            .filter(order => {
+                if (order.orderDate < filterStartDate || order.orderDate > filterEndDate) return false;
+                if (filterCustomer && order.customer !== filterCustomer) return false;
+                return true;
+            });
+    }, [allOrders, filterStartDate, filterEndDate, filterCustomer]);
     
     const allDetailedSalesData = useMemo(() => {
         const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
@@ -613,10 +627,9 @@ const Reports: React.FC<ReportsProps> = ({
         return receivables
             .filter(receivable => {
                 const order = allOrders.find(o => o.id === receivable.id);
-                return order && 
-                       order.orderDate >= filterStartDate && 
-                       order.orderDate <= filterEndDate &&
-                       receivable.paymentStatus === 'Belum Lunas';
+                if (!order || order.orderDate < filterStartDate || order.orderDate > filterEndDate) return false;
+                if (filterCustomer && receivable.customer !== filterCustomer) return false;
+                return true;
             })
             .map(r => {
                 const paid = r.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
@@ -624,7 +637,7 @@ const Reports: React.FC<ReportsProps> = ({
                 return { ...r, paid, remaining };
             })
             .sort((a, b) => b.id.localeCompare(a.id));
-    }, [receivables, allOrders, filterStartDate, filterEndDate]);
+    }, [receivables, allOrders, filterStartDate, filterEndDate, filterCustomer]);
     
     const paginatedReceivables = useMemo(() => {
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -642,6 +655,143 @@ const Reports: React.FC<ReportsProps> = ({
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
         return filteredInventoryData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     }, [filteredInventoryData, currentPage]);
+
+    const handlePrintCustomerSpecificReport = (reportType: 'sales' | 'receivables') => {
+        if (!filterCustomer) {
+            alert("Silakan pilih pelanggan terlebih dahulu untuk mencetak laporan.");
+            return;
+        }
+
+        const reportPeriod = `Periode: ${filterStartDate ? new Date(filterStartDate).toLocaleDateString('id-ID') : '...'} - ${filterEndDate ? new Date(filterEndDate).toLocaleDateString('id-ID') : '...'}`;
+        let tableRows = '';
+        let summaryHtml = '';
+        let reportTitle = '';
+        let tableHeaders = '';
+
+        if (reportType === 'sales') {
+            reportTitle = 'Laporan Penjualan Pelanggan';
+            const reportItems = filteredSalesData;
+            const totalNota = reportItems.length;
+            const totalItems = reportItems.reduce((sum, order) => sum + order.orderItems.length, 0);
+            const totalPenjualan = reportItems.reduce((sum, order) => sum + order.totalPrice, 0);
+
+            tableHeaders = `
+                <tr>
+                    <th>Total Nota</th>
+                    <th>Total Item</th>
+                    <th class="currency">Total Penjualan</th>
+                </tr>`;
+            
+            tableRows = `
+                <tr>
+                    <td>${totalNota} Nota</td>
+                    <td>${totalItems} Item</td>
+                    <td class="currency">${formatCurrency(totalPenjualan)}</td>
+                </tr>`;
+
+        } else { // receivables
+            reportTitle = 'Laporan Piutang Pelanggan';
+            const reportItems = filteredReceivablesData;
+            
+            tableHeaders = `
+                <tr>
+                    <th>No. Nota</th>
+                    <th>Deskripsi Item</th>
+                    <th>Qty</th>
+                    <th class="currency">Total Tagihan</th>
+                    <th class="currency">Dibayar</th>
+                    <th class="currency">Sisa</th>
+                    <th>Tanggal Jatuh Tempo</th>
+                </tr>`;
+                
+            tableRows = reportItems.flatMap(receivable => {
+                const fullOrder = allOrders.find(o => o.id === receivable.id);
+                if (!fullOrder) return [];
+        
+                return fullOrder.orderItems.map((item, index) => {
+                    const product = products.find(p => p.id === item.productId);
+                    const isFirstItem = index === 0;
+        
+                    return `
+                        <tr>
+                            ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.id}</td>` : ''}
+                            <td>${item.description || product?.name || 'N/A'}</td>
+                            <td>${item.qty} Pcs</td>
+                            ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.amount)}</td>` : ''}
+                            ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.paid)}</td>` : ''}
+                            ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.remaining)}</td>` : ''}
+                            ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${formatDate(receivable.due)}</td>` : ''}
+                        </tr>
+                    `;
+                }).join('');
+            }).join('');
+
+            const totalSisa = reportItems.reduce((sum, r) => sum + r.remaining, 0);
+            summaryHtml = `
+                <div class="summary-box">
+                    <table style="width: 250px; float: right; border: none;">
+                        <tr><td style="border:none;">Total Sisa Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalSisa)}</strong></td></tr>
+                    </table>
+                </div>`;
+        }
+
+        const printContent = `
+            <html>
+                <head>
+                    <title>${reportTitle} - ${filterCustomer}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; font-size: 10pt; color: #333; }
+                        .page { width: 190mm; min-height: 270mm; padding: 10mm; margin: 5mm auto; background: white; }
+                        .header, .customer-info, .summary { display: flex; justify-content: space-between; align-items: flex-start; }
+                        .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
+                        hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; vertical-align: top; }
+                        th { background-color: #f2f2f2; }
+                        .currency { text-align: right; }
+                        .summary-box { text-align: right; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; }
+                        @media print { .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-after: always; } }
+                    </style>
+                </head>
+                <body>
+                    <div class="page">
+                        <div class="header">
+                            <div>
+                                <h2>Nala Media Digital Printing</h2>
+                                <p style="font-size:8pt; margin:0;">Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar</p>
+                                <p style="font-size:8pt; margin:0;">Telp/WA: 0813-9872-7722</p>
+                            </div>
+                            <h1>${reportTitle}</h1>
+                        </div>
+                        <hr>
+                        <div class="customer-info">
+                            <strong>${filterCustomer}</strong>
+                            <span>${reportPeriod}</span>
+                        </div>
+                        <hr>
+                        <table>
+                            <thead>
+                               ${tableHeaders}
+                            </thead>
+                            <tbody>${tableRows}</tbody>
+                        </table>
+                        ${summaryHtml}
+                        <div style="clear: both; margin-top: 40px; font-size: 9pt;">
+                            <hr>
+                            <strong>Informasi Pembayaran:</strong><br>
+                            Transfer Bank ke rekening BCA 0154-361801, BRI 6707-01-02-8864-537, atau BPD JATENG 3142069325 a/n Ariska Prima Diastari.
+                        </div>
+                    </div>
+                </body>
+            </html>`;
+
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(printContent);
+          printWindow.document.close();
+          printWindow.focus();
+        }
+    };
 
 
     // --- RENDER METHODS FOR TABS ---
@@ -787,7 +937,7 @@ const Reports: React.FC<ReportsProps> = ({
             <div className="space-y-6">
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                      <ReportStatCard icon={<ReceiptTaxIcon />} title="Total Sisa Tagihan" value={formatCurrency(totalRemaining)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
-                     <ReportStatCard icon={<ExclamationTriangleIcon />} title="Jumlah Nota Belum Lunas" value={filteredReceivablesData.length.toString()} gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500" />
+                     <ReportStatCard icon={<ExclamationTriangleIcon />} title="Jumlah Nota Belum Lunas" value={filteredReceivablesData.filter(r => r.paymentStatus === 'Belum Lunas').length.toString()} gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500" />
                  </div>
                  <div>
                     <h4 className="font-semibold mb-2">Daftar Piutang</h4>
@@ -799,6 +949,7 @@ const Reports: React.FC<ReportsProps> = ({
                                     <th className="py-2 px-3 text-left">Pelanggan</th>
                                     <th className="py-2 px-3 text-right">Sisa Tagihan</th>
                                     <th className="py-2 px-3 text-center">Status Produksi</th>
+                                    <th className="py-2 px-3 text-left">Jatuh Tempo</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
@@ -812,8 +963,12 @@ const Reports: React.FC<ReportsProps> = ({
                                                 {r.productionStatus}
                                             </span>
                                         </td>
+                                        <td className="py-2 px-3">{formatDate(r.due)}</td>
                                     </tr>
                                 ))}
+                                 {paginatedReceivables.length === 0 && (
+                                    <tr><td colSpan={5} className="text-center py-8 text-gray-500">Tidak ada data piutang pada periode ini.</td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -967,13 +1122,35 @@ const Reports: React.FC<ReportsProps> = ({
             </div>
             
             {isDateFilterable && (
-                <div className="flex items-center space-x-4 my-4 p-3 bg-gray-50 rounded-lg no-print">
-                    <label className="text-sm font-medium">Periode:</label>
-                    <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-600" />
-                    <span className="text-gray-500">-</span>
-                    <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-600" />
+                 <div className="my-4 p-3 bg-gray-50 rounded-lg no-print">
+                    <div className="flex items-center space-x-4">
+                        <label className="text-sm font-medium">Periode Laporan:</label>
+                        <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-600" />
+                        <span className="text-gray-500">-</span>
+                        <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-600" />
+                        <div className="flex-grow"></div>
+                        <button onClick={() => setIsCustomerReportFilterVisible(!isCustomerReportFilterVisible)} className="flex items-center space-x-2 text-gray-600 bg-white border hover:bg-gray-100 px-3 py-2 rounded-lg text-sm font-semibold">
+                            <FilterIcon className="h-4 w-4" /> 
+                            <span>Laporan Pelanggan</span>
+                            <ChevronDownIcon className={`h-4 w-4 transition-transform ${isCustomerReportFilterVisible ? 'rotate-180' : ''}`} />
+                        </button>
+                    </div>
+                    {isCustomerReportFilterVisible && (
+                        <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="p-2 border rounded-md bg-white text-sm">
+                                <option value="">Semua Pelanggan</option>
+                                {uniqueCustomers.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <div className="md:col-span-2 flex justify-end">
+                                 <button onClick={() => handlePrintCustomerSpecificReport(activeTab as 'sales' | 'receivables')} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:bg-blue-300" disabled={!filterCustomer}>
+                                    Buat Laporan Pelanggan
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
+
 
             <div className="mt-6">
                 {renderContent()}

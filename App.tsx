@@ -1,11 +1,3 @@
-
-
-
-
-
-
-
-
 import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -23,8 +15,9 @@ import Payroll from './components/Payroll';
 import Login from './components/Login';
 import { supabase } from './supabaseClient';
 import { type Session } from '@supabase/supabase-js';
-import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData } from './types';
+import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem } from './types';
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
+import { ShoppingCartIcon, ExclamationTriangleIcon, CreditCardIcon } from './components/Icons';
 
 console.log("Build: Script is being parsed and component is about to be created.");
 
@@ -41,7 +34,8 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
     receivableDueSoonAlert: true,
     receivableDueSoonDays: 3,
     receivableOverdueAlert: true,
-    newOrderInQueueAlert: false
+    newOrderInQueueAlert: false,
+    defaultDueDateDays: 7,
 };
 
 const DEFAULT_STORE_INFO: StoreInfo = {
@@ -62,6 +56,7 @@ const App: React.FC = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [activeMenu, setActiveMenu] = useState<MenuKey>('dashboard');
   const [isSidebarOpen, setSidebarOpen] = useState(true);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   
   // All data states
   const [allOrders, setAllOrders] = useState<SavedOrder[]>([]);
@@ -125,6 +120,7 @@ const App: React.FC = () => {
     setNoteCounter(1);
     setNotePrefix('INV-');
     setInitialCash(0);
+    setNotifications([]);
   }, []);
 
   const fetchAllData = useCallback(async () => {
@@ -205,7 +201,9 @@ const App: React.FC = () => {
         dbPermissions.Admin = ALL_PERMISSIONS_LIST;
         setMenuPermissions(dbPermissions);
     }
-    if (notifSetting) setNotificationSettings(notifSetting.value);
+    if (notifSetting && notifSetting.value) {
+        setNotificationSettings({ ...DEFAULT_NOTIFICATION_SETTINGS, ...notifSetting.value });
+    }
     if (storeInfoSetting) setStoreInfo(storeInfoSetting.value);
     if (paymentMethodsSetting && Array.isArray(paymentMethodsSetting.value)) {
         setPaymentMethods(paymentMethodsSetting.value);
@@ -221,7 +219,7 @@ const App: React.FC = () => {
     if(legacyIncomeSetting && legacyIncomeSetting.value.amount > 0) setLegacyIncome(legacyIncomeSetting.value); else setLegacyIncome(null);
     if(legacyExpenseSetting && legacyExpenseSetting.value.amount > 0) setLegacyExpense(legacyExpenseSetting.value); else setLegacyExpense(null);
 
-    // FIX: An order is only "processed" when its status is NOT 'Dalam Antrian'.
+    // An order is only "processed" when its status is NOT 'Dalam Antrian'.
     // It remains "unprocessed" even if paid (DP), as long as it hasn't been sent to production.
     const processedReceivables = allFetchedReceivables.filter(r => r.productionStatus !== 'Dalam Antrian');
     const processedOrderIds = new Set(processedReceivables.map(r => r.id));
@@ -334,6 +332,57 @@ const App: React.FC = () => {
         supabase.removeChannel(channel);
     };
   }, [profile, fetchAllData]);
+
+  // --- Notification Generation ---
+  // This section generates notifications based on current app state and user settings.
+  const navigateTo = useCallback((menu: MenuKey) => setActiveMenu(menu), []);
+
+  useEffect(() => {
+      if (!profile) return;
+
+      const generateNotifications = () => {
+          const newNotifications: NotificationItem[] = [];
+          const now = new Date();
+
+          // 1. Low Stock Alert
+          if (notificationSettings.lowStockAlert) {
+              inventory.forEach(item => {
+                  if (item.stock <= notificationSettings.lowStockThreshold) {
+                      newNotifications.push({
+                          id: `low-stock-${item.id}`,
+                          icon: <ExclamationTriangleIcon className="h-5 w-5 text-red-500" />,
+                          text: `Stok '${item.name}' menipis! Sisa ${item.stock} ${item.unit}.`,
+                          time: now.toISOString(),
+                          type: 'warning',
+                          onNavigate: () => navigateTo('inventory'),
+                      });
+                  }
+              });
+          }
+          
+          // 2. Receivables Alerts moved to Receivables.tsx
+          
+          // 3. New Orders in Queue Alert
+          if (notificationSettings.newOrderInQueueAlert && unprocessedOrders.length > 0) {
+              newNotifications.push({
+                  id: 'new-orders-summary',
+                  icon: <ShoppingCartIcon className="h-5 w-5 text-blue-500" />,
+                  text: `Ada ${unprocessedOrders.length} order baru di antrian produksi.`,
+                  time: now.toISOString(),
+                  type: 'info',
+                  onNavigate: () => navigateTo('production'),
+              });
+          }
+          
+          setNotifications(newNotifications.sort((a,b) => b.time.localeCompare(a.time)));
+      };
+
+      generateNotifications();
+  }, [inventory, unprocessedOrders, notificationSettings, profile, navigateTo]);
+
+  const handleDismissNotification = useCallback((id: string) => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
 
   // --- Data Handlers ---
   const handleAddProfile = useCallback(async (newProfileData: { name: string; level: UserLevel }) => {
@@ -523,18 +572,23 @@ const App: React.FC = () => {
     } else {
         const order = allOrders.find(o => o.id === orderId);
         if (!order) return;
+
+        const dueDate = new Date(order.orderDate);
+        dueDate.setDate(dueDate.getDate() + notificationSettings.defaultDueDateDays);
+        const newDueDate = dueDate.toISOString().substring(0, 10);
+
         const newReceivable: Omit<ReceivableItem, 'payments'> = {
             id: order.id,
             customer: order.customer,
             amount: order.totalPrice,
-            due: new Date().toISOString().substring(0, 10),
+            due: newDueDate,
             paymentStatus: 'Belum Lunas',
             productionStatus: 'Proses Cetak'
         };
         const { error } = await supabase.from('receivables').insert(newReceivable);
         if (error) { alert(`Gagal proses order: ${error.message}`); return; }
     }
-  }, [allOrders, receivables]);
+  }, [allOrders, receivables, notificationSettings]);
 
   const handleDeleteOrder = useCallback(async (orderId: string) => {
       const { error } = await supabase.from('orders').delete().eq('id', orderId);
@@ -633,11 +687,15 @@ const App: React.FC = () => {
         newPaymentStatus = 'Lunas';
     }
 
+    const dueDate = new Date(order.orderDate);
+    dueDate.setDate(dueDate.getDate() + notificationSettings.defaultDueDateDays);
+    const newDueDate = dueDate.toISOString().substring(0, 10);
+
     const newReceivable: ReceivableItem = {
         id: order.id,
         customer: order.customer,
         amount: finalTotalAmount,
-        due: order.orderDate,
+        due: newDueDate,
         paymentStatus: newPaymentStatus,
         productionStatus: 'Dalam Antrian',
         payments: [paymentDetails],
@@ -649,14 +707,43 @@ const App: React.FC = () => {
         alert(`Gagal memproses pembayaran untuk order baru: ${error?.message}`);
         return;
     }
-  }, [allOrders]);
+  }, [allOrders, notificationSettings]);
+
+  const handleUpdateReceivableDueDate = useCallback(async (orderId: string, newDueDate: string) => {
+    const { error } = await supabase
+        .from('receivables')
+        .update({ due: newDueDate })
+        .eq('id', orderId);
+
+    if (error) {
+        alert(`Gagal memperbarui tanggal jatuh tempo: ${error.message}`);
+    }
+    // Real-time will handle the update.
+  }, []);
+
+  const handleBulkUpdateReceivableDueDate = useCallback(async (orderIds: string[], newDueDate: string) => {
+    if (orderIds.length === 0) return;
+
+    const { error } = await supabase
+        .from('receivables')
+        .update({ due: newDueDate })
+        .in('id', orderIds);
+
+    if (error) {
+        alert(`Gagal memperbarui tanggal jatuh tempo secara massal: ${error.message}`);
+    } else {
+        alert(`${orderIds.length} nota berhasil diperbarui tanggal jatuh temponya.`);
+    }
+    // Real-time will handle the update.
+  }, []);
+
 
   const handleBulkProcessPayment = useCallback(async (orderIds: string[], paymentDate: string, paymentMethodId: string) => {
     const method = paymentMethods.find(m => m.id === paymentMethodId);
     if (!method) return;
 
     const receivableIds = new Set(receivables.map(r => r.id));
-    // FIX: Changed type from Promise<any>[] to any[] because Supabase query builders are "thenable" but not full Promises,
+    // Supabase query builders are "thenable" but not full Promises,
     // causing a TypeScript error. Promise.all can handle an array of thenables.
     const operations: any[] = [];
 
@@ -674,9 +761,14 @@ const App: React.FC = () => {
             const order = allOrders.find(o => o.id === id);
             if (order) {
                 const payment: Payment = { amount: order.totalPrice, date: paymentDate, methodId: method.id, methodName: method.name };
+                
+                const dueDate = new Date(order.orderDate);
+                dueDate.setDate(dueDate.getDate() + notificationSettings.defaultDueDateDays);
+                const newDueDate = dueDate.toISOString().substring(0, 10);
+
                 const newReceivable: ReceivableItem = {
                     id: order.id, customer: order.customer, amount: order.totalPrice,
-                    due: order.orderDate, paymentStatus: 'Lunas', productionStatus: 'Dalam Antrian',
+                    due: newDueDate, paymentStatus: 'Lunas', productionStatus: 'Dalam Antrian',
                     payments: [payment], discount: 0,
                 };
                 operations.push(supabase.from('receivables').insert(newReceivable).select());
@@ -685,7 +777,7 @@ const App: React.FC = () => {
     });
 
     await Promise.all(operations);
-  }, [receivables, allOrders, paymentMethods]);
+  }, [receivables, allOrders, paymentMethods, notificationSettings]);
 
   const handleAddExpense = useCallback(async (newExpense: Omit<ExpenseItem, 'id'>) => {
     const { data, error } = await supabase.from('expenses').insert(newExpense).select().single();
@@ -817,7 +909,7 @@ const App: React.FC = () => {
     switch (activeMenu) {
       case 'dashboard': return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} />;
       case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} />;
-      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} />;
+      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
       case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
       case 'production': return <Production boardData={boardData} allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} onProductionMove={handleProductionMove} onDeliverOrder={handleDeliverOrder} onCancelQueue={handleCancelQueue} />;
@@ -871,6 +963,8 @@ const App: React.FC = () => {
           expenses={expenses}
           employees={employees}
           menuPermissions={profile ? menuPermissions[profile.level] : []}
+          notifications={notifications}
+          onDismissNotification={handleDismissNotification}
         />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-4 sm:p-6 lg:p-8">
           {profile && renderContent()}

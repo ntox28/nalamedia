@@ -1,18 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BellIcon, UserCircleIcon, ExclamationTriangleIcon, CreditCardIcon } from './Icons';
-import { type Profile, type MenuKey, type SavedOrder, type CustomerData, type ProductData, type ExpenseItem, type EmployeeData } from '../types';
+import { BellIcon, UserCircleIcon } from './Icons';
+import { type Profile, type MenuKey, type SavedOrder, type CustomerData, type ProductData, type ExpenseItem, type EmployeeData, type NotificationItem } from '../types';
 import CommandPalette from './CommandPalette';
 
-// --- Start of Notification Pop-up Components & Data ---
-
-const initialNotificationsData: {id: number, icon: React.ReactNode, text: string, time: string}[] = [];
-
+// --- Notification Pop-up Component ---
+// This component renders the notification list when the bell icon is clicked.
 const NotificationsPopup: React.FC<{ 
-    notifications: typeof initialNotificationsData;
-    onDismiss: (id: number) => void;
-}> = ({ notifications, onDismiss }) => (
+    notifications: NotificationItem[];
+    onDismiss: (id: string) => void;
+    onClosePopup: () => void;
+}> = ({ notifications, onDismiss, onClosePopup }) => {
+    
+    // Calculates readable relative time (e.g., "5 menit lalu").
+    const timeAgo = (isoDate: string) => {
+        const seconds = Math.floor((new Date().getTime() - new Date(isoDate).getTime()) / 1000);
+        let interval = seconds / 31536000;
+        if (interval > 1) return Math.floor(interval) + " tahun lalu";
+        interval = seconds / 2592000;
+        if (interval > 1) return Math.floor(interval) + " bulan lalu";
+        interval = seconds / 86400;
+        if (interval > 1) return Math.floor(interval) + " hari lalu";
+        interval = seconds / 3600;
+        if (interval > 1) return Math.floor(interval) + " jam lalu";
+        interval = seconds / 60;
+        if (interval > 1) return Math.floor(interval) + " menit lalu";
+        return "Baru saja";
+    };
+    
+    return (
     <div 
         className="absolute top-full right-0 mt-2 w-80 max-w-sm bg-white rounded-lg shadow-lg border z-50"
+        aria-label="Notification Popup"
     >
         <div className="p-3 border-b">
             <h3 className="font-semibold text-gray-800">Notifikasi</h3>
@@ -20,15 +38,27 @@ const NotificationsPopup: React.FC<{
         <div className="py-2 max-h-96 overflow-y-auto">
             {notifications.length > 0 ? (
                 notifications.map(item => (
-                    <div key={item.id} className="px-3 py-1">
-                        <div className="flex items-start p-2 hover:bg-gray-100 rounded-md relative group">
+                    <div 
+                        key={item.id} 
+                        className="px-3 py-1"
+                        onClick={() => {
+                            if (item.onNavigate) {
+                                item.onNavigate();
+                                onClosePopup();
+                            }
+                        }}
+                    >
+                        <div className={`flex items-start p-2 rounded-md relative group ${item.onNavigate ? 'cursor-pointer hover:bg-gray-100' : ''}`}>
                             <div className="flex-shrink-0 mt-1">{item.icon}</div>
                             <div className="ml-3 flex-1">
                                 <p className="text-sm text-gray-700 leading-tight">{item.text}</p>
-                                <p className="text-xs text-gray-500 mt-1">{item.time}</p>
+                                <p className="text-xs text-gray-500 mt-1">{timeAgo(item.time)}</p>
                             </div>
                             <button 
-                                onClick={() => onDismiss(item.id)} 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDismiss(item.id);
+                                }} 
                                 className="absolute top-1 right-1 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity text-lg" 
                                 aria-label="Tutup notifikasi"
                             >
@@ -44,8 +74,7 @@ const NotificationsPopup: React.FC<{
             )}
         </div>
     </div>
-);
-// --- End of Notification Pop-up Components & Data ---
+)};
 
 
 interface HeaderProps {
@@ -61,23 +90,21 @@ interface HeaderProps {
   expenses: ExpenseItem[];
   employees: EmployeeData[];
   menuPermissions: string[];
+  notifications: NotificationItem[];
+  onDismissNotification: (id: string) => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ 
     title, onToggleSidebar, currentUser, onLogout, onNavigateToSettings, 
-    onNavigateToPage, allOrders, customers, products, expenses, employees, menuPermissions 
+    onNavigateToPage, allOrders, customers, products, expenses, employees, menuPermissions,
+    notifications, onDismissNotification
 }) => {
-  const [notifications, setNotifications] = useState(initialNotificationsData);
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  const handleDismissNotification = (id: number) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  };
-  
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -134,14 +161,20 @@ const Header: React.FC<HeaderProps> = ({
             onClick={() => setNotificationsOpen(prev => !prev)}
             className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full focus:outline-none"
             aria-label="Notifikasi"
+            aria-haspopup="true"
+            aria-expanded={isNotificationsOpen}
           >
             <BellIcon />
             {notifications.length > 0 && (
-              <span className="absolute top-0 right-0 h-2 w-2 mt-1 mr-1 bg-red-500 rounded-full"></span>
+              <span className="absolute top-0 right-0 h-2.5 w-2.5 mt-1 mr-1 bg-red-500 rounded-full border-2 border-white"></span>
             )}
           </button>
           {isNotificationsOpen && (
-            <NotificationsPopup notifications={notifications} onDismiss={handleDismissNotification} />
+            <NotificationsPopup 
+              notifications={notifications} 
+              onDismiss={onDismissNotification} 
+              onClosePopup={() => setNotificationsOpen(false)}
+            />
           )}
         </div>
 
@@ -150,6 +183,8 @@ const Header: React.FC<HeaderProps> = ({
             onClick={() => setProfileOpen(prev => !prev)}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full focus:outline-none"
             aria-label="Profil Pengguna"
+            aria-haspopup="true"
+            aria-expanded={isProfileOpen}
           >
             <UserCircleIcon />
           </button>

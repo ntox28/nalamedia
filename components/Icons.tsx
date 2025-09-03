@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 
 const Icon: React.FC<{ children: React.ReactNode, className?: string }> = ({ children, className }) => (
@@ -41,3 +39,4 @@ export const ArrowDownTrayIcon: React.FC<{className?: string}> = ({className}) =
 export const ArrowUpTrayIcon: React.FC<{className?: string}> = ({className}) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></Icon>;
 export const ChevronDownIcon: React.FC<{ className?: string }> = ({ className }) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></Icon>;
 export const MagnifyingGlassIcon: React.FC<{className?: string}> = ({className}) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></Icon>;
+export const CheckIcon: React.FC<{className?: string}> = ({className}) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></Icon>;

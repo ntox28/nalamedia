@@ -1,5 +1,3 @@
-
-
 import type React from 'react';
 
 export type MenuKey =
@@ -271,6 +269,7 @@ export interface NotificationSettings {
   receivableDueSoonDays: number;
   receivableOverdueAlert: boolean;
   newOrderInQueueAlert: boolean;
+  defaultDueDateDays: number;
 }
 
 export interface StoreInfo {
@@ -285,6 +284,17 @@ export interface PaymentMethod {
   name: string;
   type: 'Tunai' | 'Transfer Bank' | 'QRIS' | 'E-Wallet';
   details: string;
+}
+
+// --- Notification Types ---
+// Defines the structure for a notification item, used for display in the header.
+export interface NotificationItem {
+  id: string;
+  icon: React.ReactNode;
+  text: string;
+  time: string; // ISO String for consistent time calculation
+  type: 'warning' | 'info';
+  onNavigate?: () => void;
 }
 
 // --- Component Props ---
