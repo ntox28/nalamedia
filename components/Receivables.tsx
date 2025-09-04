@@ -10,6 +10,8 @@ type DisplayReceivable = ReceivableItem & { isUnprocessed?: boolean };
 // --- START: Reusable Components ---
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
+// FIX: Add formatDate helper function for use in printing reports.
+const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 interface StatCardProps {
   icon: React.ReactElement<{ className?: string }>;
@@ -890,13 +892,6 @@ const Receivables: React.FC<ReceivablesProps> = ({
   // Stats for cards
   const today = new Date().toISOString().substring(0, 10);
   
-  const getItemsCount = (cards: CardData[]): number => {
-      return cards.reduce((sum, card) => {
-          const order = allOrders.find(o => o.id === card.id);
-          return sum + (order?.orderItems.length || 0);
-      }, 0);
-  };
-
   const paymentsToday = useMemo(() => {
     return receivables.reduce((total, receivable) => {
         const paymentsOnToday = receivable.payments?.filter(p => p.date === today) || [];
@@ -925,9 +920,29 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const totalOrdersToday = allOrders
       .filter(o => o.orderDate === today)
       .reduce((sum, order) => sum + order.orderItems.length, 0);
-  const needsProcessingCount = getItemsCount(boardData.queue);
+
+  const needsProcessingCount = useMemo(() => {
+    return unprocessedOrders.reduce((sum, order) => sum + order.orderItems.length, 0);
+  }, [unprocessedOrders]);
+  
+  const getItemsCount = (cards: CardData[]): number => {
+      return cards.reduce((sum, card) => {
+          const order = allOrders.find(o => o.id === card.id);
+          return sum + (order?.orderItems.length || 0);
+      }, 0);
+  };
   const finishedInWarehouseCount = getItemsCount(boardData.warehouse);
-  const deliveredCount = getItemsCount(boardData.delivered);
+
+  const deliveredTodayCount = useMemo(() => {
+    const deliveredTodayIds = new Set(
+        receivables
+            .filter(r => r.productionStatus === 'Telah Dikirim' && r.deliveryDate === today)
+            .map(r => r.id)
+    );
+    return allOrders
+        .filter(o => deliveredTodayIds.has(o.id))
+        .reduce((sum, order) => sum + order.orderItems.length, 0);
+  }, [receivables, allOrders, today]);
 
   const handleOpenPaymentModal = (order: DisplayReceivable) => {
     setSelectedOrder(order);
@@ -1419,130 +1434,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   };
 
 
-  const handlePrintCustomerReport = () => {
-    const customerName = filterCustomer;
-    if (!customerName) {
-        alert("Silakan pilih pelanggan terlebih dahulu untuk mencetak laporan.");
-        return;
-    }
-    const reportPeriod = (filterStartDate || filterEndDate) ? 
-      `Periode: ${filterStartDate ? new Date(filterStartDate).toLocaleDateString('id-ID') : '...'} - ${filterEndDate ? new Date(filterEndDate).toLocaleDateString('id-ID') : '...'}` :
-      'Periode: Semua Waktu';
-
-    const reportItems = filteredItems
-        .sort((a, b) => {
-            const dateA = allOrders.find(o => o.id === a.id)?.orderDate || '';
-            const dateB = allOrders.find(o => o.id === b.id)?.orderDate || '';
-            return new Date(dateA).getTime() - new Date(dateB).getTime();
-        });
-
-    let totalTagihan = 0;
-    let totalDibayar = 0;
-    let totalSisa = 0;
-
-    const tableRows = reportItems.flatMap(receivable => {
-        const fullOrder = allOrders.find(o => o.id === receivable.id);
-        if (!fullOrder) return [];
-
-        const paid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
-        const remaining = receivable.amount - (receivable.discount || 0) - paid;
-        
-        totalTagihan += receivable.amount;
-        totalDibayar += paid;
-        totalSisa += remaining > 0 ? remaining : 0;
-        
-        return fullOrder.orderItems.map((item, index) => {
-            const product = products.find(p => p.id === item.productId);
-            const isFirstItem = index === 0;
-
-            return `
-                <tr>
-                    ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.id}</td>` : ''}
-                    <td>${item.description || product?.name || 'N/A'}</td>
-                    <td>${item.qty} Pcs</td>
-                    ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.amount)}</td>` : ''}
-                    ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(paid)}</td>` : ''}
-                    ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(remaining)}</td>` : ''}
-                    ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.paymentStatus}</td>` : ''}
-                </tr>
-            `;
-        }).join('');
-    }).join('');
-    
-    const printContent = `
-        <html>
-            <head>
-                <title>Laporan Pelanggan - ${customerName}</title>
-                <style>
-                    body { font-family: Arial, sans-serif; font-size: 10pt; color: #333; }
-                    .page { width: 190mm; min-height: 270mm; padding: 10mm; margin: 5mm auto; background: white; }
-                    .header, .customer-info, .summary { display: flex; justify-content: space-between; align-items: flex-start; }
-                    .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
-                    hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; vertical-align: top; }
-                    th { background-color: #f2f2f2; }
-                    .currency { text-align: right; }
-                    .summary-box { text-align: right; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; }
-                    @media print { .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-after: always; } }
-                </style>
-            </head>
-            <body>
-                <div class="page">
-                    <div class="header">
-                        <div>
-                            <h2>Nala Media Digital Printing</h2>
-                            <p style="font-size:8pt; margin:0;">Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar</p>
-                            <p style="font-size:8pt; margin:0;">Telp/WA: 0813-9872-7722</p>
-                        </div>
-                        <h1>Laporan Piutang</h1>
-                    </div>
-                    <hr>
-                    <div class="customer-info">
-                        <strong>${customerName}</strong>
-                        <span>${reportPeriod}</span>
-                    </div>
-                    <hr>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>No. Nota</th>
-                                <th>Deskripsi Item</th>
-                                <th>Qty</th>
-                                <th class="currency">Total Tagihan</th>
-                                <th class="currency">Dibayar</th>
-                                <th class="currency">Sisa</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>${tableRows}</tbody>
-                    </table>
-                    
-                    <div class="summary-box">
-                        <table style="width: 250px; float: right; border: none;">
-                            <tr><td style="border:none;">Total Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalTagihan)}</strong></td></tr>
-                             <tr><td style="border:none;">Total Dibayar:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalDibayar)}</strong></td></tr>
-                            <tr><td style="border:none;">Sisa Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalSisa)}</strong></td></tr>
-                        </table>
-                    </div>
-                    <div style="clear: both; margin-top: 40px; font-size: 9pt;">
-                        <hr>
-                        <strong>Informasi Pembayaran:</strong><br>
-                        Transfer Bank ke rekening BCA 0154-361801, BRI 6707-01-02-8864-537, atau BPD JATENG 3142069325 a/n Ariska Prima Diastari.
-                    </div>
-                </div>
-            </body>
-        </html>`;
-
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      printWindow.focus();
-    }
-  };
-  
-    const handleSendWhatsApp = (order: ReceivableItem) => {
+  const handleSendWhatsApp = (order: ReceivableItem) => {
     const fullOrder = allOrders.find(o => o.id === order.id);
     const customerData = customers.find(c => c.name === order.customer);
 
@@ -1871,6 +1763,123 @@ const Receivables: React.FC<ReceivablesProps> = ({
       onUpdateDueDate(orderId, newDueDate);
       setEditingDueDateId(null);
   };
+    // FIX: Add handlePrintCustomerReport function definition.
+    const handlePrintCustomerReport = () => {
+        if (!filterCustomer) {
+            alert("Silakan pilih pelanggan dari filter terlebih dahulu.");
+            return;
+        }
+        
+        const reportPeriod = `Periode: ${filterStartDate ? formatDate(filterStartDate) : '...'} - ${filterEndDate ? formatDate(filterEndDate) : '...'}`;
+        const reportTitle = 'Laporan Piutang Pelanggan';
+        const reportItems = filteredItems.filter(r => r.customer === filterCustomer);
+
+        const tableHeaders = `
+            <tr>
+                <th>No. Nota</th>
+                <th>Deskripsi Item</th>
+                <th>Qty</th>
+                <th class="currency">Total Tagihan</th>
+                <th class="currency">Dibayar</th>
+                <th class="currency">Sisa</th>
+                <th>Tanggal Jatuh Tempo</th>
+            </tr>`;
+            
+        const tableRows = reportItems.flatMap(receivable => {
+            const fullOrder = allOrders.find(o => o.id === receivable.id);
+            if (!fullOrder) return [];
+    
+            const paid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+            const remaining = receivable.amount - (receivable.discount || 0) - paid;
+
+            return fullOrder.orderItems.map((item, index) => {
+                const product = products.find(p => p.id === item.productId);
+                const isFirstItem = index === 0;
+    
+                return `
+                    <tr>
+                        ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.id}</td>` : ''}
+                        <td>${item.description || product?.name || 'N/A'}</td>
+                        <td>${item.qty} Pcs</td>
+                        ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.amount)}</td>` : ''}
+                        ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(paid)}</td>` : ''}
+                        ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(remaining)}</td>` : ''}
+                        ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${formatDate(receivable.due)}</td>` : ''}
+                    </tr>
+                `;
+            }).join('');
+        }).join('');
+
+        const totalSisa = reportItems.reduce((sum, r) => {
+            const paid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
+            const remaining = r.amount - (r.discount || 0) - paid;
+            return sum + remaining;
+        }, 0);
+
+        const summaryHtml = `
+            <div class="summary-box">
+                <table style="width: 250px; float: right; border: none;">
+                    <tr><td style="border:none;">Total Sisa Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalSisa)}</strong></td></tr>
+                </table>
+            </div>`;
+
+        const printContent = `
+            <html>
+                <head>
+                    <title>${reportTitle} - ${filterCustomer}</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; font-size: 10pt; color: #333; }
+                        .page { width: 190mm; min-height: 270mm; padding: 10mm; margin: 5mm auto; background: white; }
+                        .header, .customer-info, .summary { display: flex; justify-content: space-between; align-items: flex-start; }
+                        .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
+                        hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; vertical-align: top; }
+                        th { background-color: #f2f2f2; }
+                        .currency { text-align: right; }
+                        .summary-box { text-align: right; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; }
+                        @media print { .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-after: always; } }
+                    </style>
+                </head>
+                <body>
+                    <div class="page">
+                        <div class="header">
+                            <div>
+                                <h2>Nala Media Digital Printing</h2>
+                                <p style="font-size:8pt; margin:0;">Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar</p>
+                                <p style="font-size:8pt; margin:0;">Telp/WA: 0813-9872-7722</p>
+                            </div>
+                            <h1>${reportTitle}</h1>
+                        </div>
+                        <hr>
+                        <div class="customer-info">
+                            <strong>${filterCustomer}</strong>
+                            <span>${reportPeriod}</span>
+                        </div>
+                        <hr>
+                        <table>
+                            <thead>
+                               ${tableHeaders}
+                            </thead>
+                            <tbody>${tableRows}</tbody>
+                        </table>
+                        ${summaryHtml}
+                        <div style="clear: both; margin-top: 40px; font-size: 9pt;">
+                            <hr>
+                            <strong>Informasi Pembayaran:</strong><br>
+                            Transfer Bank ke rekening BCA 0154-361801, BRI 6707-01-02-8864-537, atau BPD JATENG 3142069325 a/n Ariska Prima Diastari.
+                        </div>
+                    </div>
+                </body>
+            </html>`;
+        
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(printContent);
+          printWindow.document.close();
+          printWindow.focus();
+        }
+    };
 
 
   return (
@@ -1900,7 +1909,12 @@ const Receivables: React.FC<ReceivablesProps> = ({
             icon={<WrenchScrewdriverIcon />} 
             title="Item Perlu Proses" 
             value={`${needsProcessingCount}`}
-            onClick={() => setModalData({ title: "Daftar Order Perlu Proses", orders: boardData.queue })}
+            onClick={() => {
+                const unprocessedOrdersAsCards = unprocessedOrders
+                    .sort((a, b) => b.id.localeCompare(a.id))
+                    .map(o => ({ id: o.id, customer: o.customer, details: o.details }));
+                setModalData({ title: "Daftar Order Perlu Diproses", orders: unprocessedOrdersAsCards });
+            }}
             gradient="bg-gradient-to-br from-amber-500 to-yellow-500"
           />
           <StatCard 
@@ -1912,9 +1926,19 @@ const Receivables: React.FC<ReceivablesProps> = ({
           />
           <StatCard 
             icon={<HomeIcon />} 
-            title="Item Terkirim" 
-            value={`${deliveredCount}`}
-            onClick={() => setModalData({ title: "Daftar Order Telah Terkirim", orders: boardData.delivered })}
+            title="Item Terkirim Hari Ini" 
+            value={`${deliveredTodayCount}`}
+            onClick={() => {
+                const deliveredTodayIds = new Set(
+                    receivables
+                        .filter(r => r.productionStatus === 'Telah Dikirim' && r.deliveryDate === today)
+                        .map(r => r.id)
+                );
+                const deliveredTodayOrders = allOrders
+                    .filter(o => deliveredTodayIds.has(o.id))
+                    .map(o => ({ id: o.id, customer: o.customer, details: o.details }));
+                setModalData({ title: "Daftar Order Terkirim Hari Ini", orders: deliveredTodayOrders });
+            }}
             gradient="bg-gradient-to-br from-pink-500 to-rose-500"
           />
       </div>

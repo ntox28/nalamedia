@@ -1,8 +1,6 @@
-
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Cog6ToothIcon, PlusCircleIcon, TrashIcon, PencilIcon, PrinterIcon, PlayIcon, ClipboardIcon, ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon } from './Icons';
-import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData } from '../types';
+import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData, type ReceivableItem } from '../types';
 
 const getInitialState = () => ({
   orderItems: [{ 
@@ -183,12 +181,14 @@ interface SalesProps {
   noteCounter: number;
   notePrefix: string;
   onUpdateNoteSettings: (prefix: string, startNumber: number) => void;
+  receivables: ReceivableItem[];
 }
 
 const Sales: React.FC<SalesProps> = ({ 
   unprocessedOrders, onSaveOrder, onUpdateOrder, onProcessOrder, onDeleteOrder, 
   products, categories, finishings, customers,
-  allOrders, boardData, noteCounter, notePrefix, onUpdateNoteSettings
+  allOrders, boardData, noteCounter, notePrefix, onUpdateNoteSettings,
+  receivables
 }) => {
   const [orderItems, setOrderItems] = useState<OrderItemData[]>(getInitialState().orderItems);
   const [customer, setCustomer] = useState(getInitialState().customer);
@@ -224,9 +224,22 @@ const Sales: React.FC<SalesProps> = ({
     .filter(o => o.orderDate === today)
     .reduce((sum, order) => sum + order.orderItems.length, 0);
     
-  const needsProcessingCount = getItemsCount(boardData.queue);
+  const needsProcessingCount = useMemo(() => {
+    return unprocessedOrders.reduce((sum, order) => sum + order.orderItems.length, 0);
+  }, [unprocessedOrders]);
+
   const finishedInWarehouseCount = getItemsCount(boardData.warehouse);
-  const deliveredCount = getItemsCount(boardData.delivered);
+  
+  const deliveredTodayCount = useMemo(() => {
+    const deliveredTodayIds = new Set(
+        receivables
+            .filter(r => r.productionStatus === 'Telah Dikirim' && r.deliveryDate === today)
+            .map(r => r.id)
+    );
+    return allOrders
+        .filter(o => deliveredTodayIds.has(o.id))
+        .reduce((sum, order) => sum + order.orderItems.length, 0);
+  }, [receivables, allOrders, today]);
 
   const handleSaveNotaSettings = (newPrefix: string, newStartNumberStr: string) => {
     const newStartNumber = parseInt(newStartNumberStr, 10);
@@ -666,7 +679,12 @@ const Sales: React.FC<SalesProps> = ({
             icon={<WrenchScrewdriverIcon />} 
             title="Item Perlu Proses" 
             value={`${needsProcessingCount}`}
-            onClick={() => setModalData({ title: "Daftar Order Perlu Proses", orders: boardData.queue })}
+            onClick={() => {
+                const unprocessedOrdersAsCards = unprocessedOrders
+                    .sort((a, b) => b.id.localeCompare(a.id))
+                    .map(o => ({ id: o.id, customer: o.customer, details: o.details }));
+                setModalData({ title: "Daftar Order Perlu Diproses", orders: unprocessedOrdersAsCards });
+            }}
             gradient="bg-gradient-to-br from-amber-500 to-yellow-500"
           />
           <StatCard 
@@ -678,9 +696,19 @@ const Sales: React.FC<SalesProps> = ({
           />
           <StatCard 
             icon={<HomeIcon />} 
-            title="Item Terkirim" 
-            value={`${deliveredCount}`}
-            onClick={() => setModalData({ title: "Daftar Order Telah Terkirim", orders: boardData.delivered })}
+            title="Item Terkirim Hari Ini" 
+            value={`${deliveredTodayCount}`}
+            onClick={() => {
+                const deliveredTodayIds = new Set(
+                    receivables
+                        .filter(r => r.productionStatus === 'Telah Dikirim' && r.deliveryDate === today)
+                        .map(r => r.id)
+                );
+                const deliveredTodayOrders = allOrders
+                    .filter(o => deliveredTodayIds.has(o.id))
+                    .map(o => ({ id: o.id, customer: o.customer, details: o.details }));
+                setModalData({ title: "Daftar Order Terkirim Hari Ini", orders: deliveredTodayOrders });
+            }}
             gradient="bg-gradient-to-br from-pink-500 to-rose-500"
           />
       </div>
