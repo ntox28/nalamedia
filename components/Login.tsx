@@ -39,7 +39,7 @@ const Login: React.FC = () => {
           <h1 className="text-xl font-bold text-center text-gray-800 mb-1">LOGIN</h1>
           <p className="text-center text-sm text-gray-500 mb-6">Masukkan data login untuk melanjutkan ke Aplikasi Nalamedia</p>
           
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                 Email
@@ -49,7 +49,7 @@ const Login: React.FC = () => {
                   id="email"
                   name="email"
                   type="email"
-                  autoComplete="email"
+                  autoComplete="off"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -67,7 +67,7 @@ const Login: React.FC = () => {
                   id="password"
                   name="password"
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="new-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
