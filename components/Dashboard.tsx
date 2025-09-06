@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ArrowUpIcon, CurrencyDollarIcon, ShoppingCartIcon, UsersIcon, ReceiptTaxIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon } from './Icons';
@@ -101,27 +102,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
             .reduce((sum, e) => sum + e.amount, 0);
     }, [expenses, today]);
 
-    const productsUsedTodayData = useMemo(() => {
-        const todayOrders = allOrders.filter(o => o.orderDate === today);
-        const productCount: { [key: string]: number } = {};
+    const financialFlowData = useMemo(() => {
+        // Total value of orders created today
+        const totalRevenueToday = allOrders
+            .filter(o => o.orderDate === today)
+            .reduce((sum, order) => sum + order.totalPrice, 0);
 
-        todayOrders.forEach(order => {
-            order.orderItems.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                if (product) {
-                    if (!productCount[product.name]) {
-                        productCount[product.name] = 0;
-                    }
-                    productCount[product.name] += item.qty;
+        // Total outstanding amount for orders created today
+        const receivablesToday = allOrders
+            .filter(o => o.orderDate === today)
+            .reduce((sum, order) => {
+                const receivable = receivables.find(r => r.id === order.id);
+                if (receivable) { // It has been processed for payment
+                    const totalPaid = receivable.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
+                    const remaining = receivable.amount - (receivable.discount || 0) - totalPaid;
+                    return sum + (remaining > 0 ? remaining : 0);
+                } else { // It's an unprocessed order, so full amount is receivable
+                    return sum + order.totalPrice;
                 }
-            });
-        });
+            }, 0);
 
-        return Object.entries(productCount)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a, b) => b.value - a.value)
-            .slice(0, 6); // Limit to top 6 for readability
-    }, [allOrders, products, today]);
+        return [
+          { name: 'Total Pendapatan', value: totalRevenueToday },
+          { name: 'Dibayar', value: incomeToday },
+          { name: 'Piutang', value: receivablesToday },
+          { name: 'Pengeluaran', value: expensesToday },
+        ].filter(item => item.value > 0);
+    }, [allOrders, receivables, incomeToday, expensesToday, today]);
+
+    const PIE_COLORS_FINANCE = ['#3b82f6', '#22c55e', '#f97316', '#ef4444']; // Blue, Green, Orange, Red
     
     const recentPayments = useMemo(() => {
         const paymentsToday: any[] = [];
@@ -144,46 +153,42 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
         });
         return paymentsToday.sort((a, b) => b.orderId.localeCompare(a.orderId)).slice(0, 10);
     }, [receivables, allOrders, today]);
-    
-    const PIE_COLORS_SALES = ['#8884d8', '#82ca9d', '#ffc658', '#ff8042', '#0088FE', '#00C49F'];
 
     // --- Kalkulasi untuk Grafik ---
     const salesChartData = useMemo(() => {
-        const last7Days: { [key: string]: number } = {};
-        for (let i = 6; i >= 0; i--) {
+        const last30Days: { [key: string]: number } = {};
+        for (let i = 29; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const key = d.toISOString().substring(0, 10);
-            last7Days[key] = 0;
+            last30Days[key] = 0;
         }
 
         allOrders.forEach(order => {
-            if (last7Days[order.orderDate] !== undefined) {
-                last7Days[order.orderDate] += order.totalPrice;
+            if (last30Days[order.orderDate] !== undefined) {
+                last30Days[order.orderDate] += order.totalPrice;
             }
         });
 
-        return Object.entries(last7Days).map(([date, total]) => ({
+        return Object.entries(last30Days).map(([date, total]) => ({
             name: new Date(date).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit' }),
             Penjualan: total,
         }));
     }, [allOrders]);
 
     const productionOrdersChartData = useMemo(() => {
-        const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-        const last7Days: { [key: string]: number } = {};
+        const last30Days: { [key: string]: number } = {};
         const labels: { [key: string]: string } = {};
 
-        for (let i = 6; i >= 0; i--) {
+        for (let i = 29; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const key = d.toISOString().substring(0, 10);
-            last7Days[key] = 0;
-            // FIX: 'date' was not defined in this scope. Changed to 'key'.
+            last30Days[key] = 0;
             labels[key] = new Date(key).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit' })
         }
         
-        const sortedKeys = Object.keys(last7Days).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+        const sortedKeys = Object.keys(last30Days).sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
         
         const finalLabels: {[key: string]: string} = {};
         sortedKeys.forEach(key => {
@@ -191,12 +196,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
         });
 
         allOrders.forEach(order => {
-             if (last7Days[order.orderDate] !== undefined) {
-                last7Days[order.orderDate]++;
+             if (last30Days[order.orderDate] !== undefined) {
+                last30Days[order.orderDate]++;
             }
         });
 
-        return Object.entries(last7Days).map(([date, count]) => ({
+        return Object.entries(last30Days).map(([date, count]) => ({
             name: finalLabels[date],
             'Order Masuk': count,
         }));
@@ -218,14 +223,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
   const itemsToProcess = getItemsCount(boardData.queue);
   const itemsInPrinting = getItemsCount(boardData.printing);
   const itemsFinished = getItemsCount(boardData.warehouse);
-  const itemsDelivered = getItemsCount(boardData.delivered);
+
+  const itemsDeliveredToday = useMemo(() => {
+    const deliveredTodayIds = new Set(
+        receivables
+            .filter(r => r.productionStatus === 'Telah Dikirim' && r.deliveryDate === today)
+            .map(r => r.id)
+    );
+    return allOrders
+        .filter(o => deliveredTodayIds.has(o.id))
+        .reduce((sum, order) => sum + order.orderItems.length, 0);
+  }, [receivables, allOrders, today]);
   
   const pieChartData = useMemo(() => [
     { name: 'Dalam Antrian', value: itemsToProcess },
     { name: 'Proses Cetak', value: itemsInPrinting },
     { name: 'Siap Ambil', value: itemsFinished },
-    { name: 'Telah Dikirim', value: itemsDelivered },
-  ].filter(item => item.value > 0), [itemsToProcess, itemsInPrinting, itemsFinished, itemsDelivered]);
+    { name: 'Terkirim Hari Ini', value: itemsDeliveredToday },
+  ].filter(item => item.value > 0), [itemsToProcess, itemsInPrinting, itemsFinished, itemsDeliveredToday]);
 
   const PIE_COLORS_PRODUCTION = ['#f472b6', '#a78bfa', '#2dd4bf', '#fb7185']; // Pink, Violet, Teal, Rose
   
@@ -294,7 +309,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-md h-96 hover:shadow-lg transition-shadow duration-300">
-              <h3 className="font-bold text-lg text-gray-700 mb-4">Grafik Penjualan Harian</h3>
+              <h3 className="font-bold text-lg text-gray-700 mb-4">Grafik Penjualan (30 Hari Terakhir)</h3>
               <ResponsiveContainer width="100%" height="90%">
                 <AreaChart data={salesChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                     <defs>
@@ -317,12 +332,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
             </div>
             
             <div className="bg-white p-6 rounded-xl shadow-md h-96 hover:shadow-lg transition-shadow duration-300 flex flex-col">
-                <h3 className="font-bold text-lg text-gray-700 mb-4 flex items-center"><CubeIcon className="mr-2 text-pink-600" />Produk Terlaris Hari Ini</h3>
-                {productsUsedTodayData.length > 0 ? (
+                <h3 className="font-bold text-lg text-gray-700 mb-4 flex items-center"><CurrencyDollarIcon className="mr-2 text-pink-600" />Arus Keuangan Hari Ini</h3>
+                {financialFlowData.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                             <Pie
-                                data={productsUsedTodayData}
+                                data={financialFlowData}
                                 cx="50%"
                                 cy="50%"
                                 labelLine={false}
@@ -332,15 +347,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
                                 nameKey="name"
                                 label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
                             >
-                                {productsUsedTodayData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={PIE_COLORS_SALES[index % PIE_COLORS_SALES.length]} />
+                                {financialFlowData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={PIE_COLORS_FINANCE[index % PIE_COLORS_FINANCE.length]} />
                                 ))}
                             </Pie>
-                            <Tooltip formatter={(value: number, name: string) => [`${value} item`, name]} />
+                            <Tooltip formatter={(value: number) => [formatCurrency(value), '']} />
                         </PieChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className="flex items-center justify-center h-full text-center text-gray-500"><p>Belum ada produk yang terjual hari ini.</p></div>
+                    <div className="flex items-center justify-center h-full text-center text-gray-500"><p>Belum ada aktivitas keuangan hari ini.</p></div>
                 )}
             </div>
           </div>
@@ -386,12 +401,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
             <StatCard icon={<ShoppingCartIcon />} title="Order Hari Ini" value={`${totalItemsToday} Item`} onClick={() => onNavigate('sales')} gradient="bg-gradient-to-br from-blue-500 to-sky-500" />
             <StatCard icon={<WrenchScrewdriverIcon />} title="Order Perlu Proses" value={`${itemsToProcess} Item`} onClick={() => onNavigate('production')} gradient="bg-gradient-to-br from-amber-500 to-yellow-500" />
             <StatCard icon={<CubeIcon />} title="Item Selesai" value={`${itemsFinished} Item`} onClick={() => onNavigate('production')} gradient="bg-gradient-to-br from-teal-500 to-cyan-500" />
-            <StatCard icon={<HomeIcon />} title="Order Delivered" value={`${itemsDelivered} Item`} onClick={() => onNavigate('production')} gradient="bg-gradient-to-br from-pink-500 to-rose-500" />
+            <StatCard icon={<HomeIcon />} title="Order Delivered Hari Ini" value={`${itemsDeliveredToday} Item`} onClick={() => onNavigate('production')} gradient="bg-gradient-to-br from-pink-500 to-rose-500" />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-md h-96 hover:shadow-lg transition-shadow duration-300">
-              <h3 className="font-bold text-lg text-gray-700 mb-4">Grafik Order Produksi Mingguan</h3>
+              <h3 className="font-bold text-lg text-gray-700 mb-4">Grafik Order Produksi (30 Hari Terakhir)</h3>
               <ResponsiveContainer width="100%" height="90%">
                 <AreaChart data={productionOrdersChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                   <defs>
