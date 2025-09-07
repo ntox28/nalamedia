@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
 import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon } from './Icons';
 import { exportToExcel } from './reportUtils';
@@ -37,6 +38,7 @@ const ReportStatCard = ProminentStatCard;
 
 const TABS = [
     { key: 'finalRecap', label: 'Final Rekapitulasi' },
+    { key: 'profitAndLoss', label: 'Laba Rugi' },
     { key: 'sales', label: 'Penjualan' },
     { key: 'receivables', label: 'Piutang' },
     { key: 'inventory', label: 'Stok' },
@@ -158,7 +160,7 @@ const LegacyReceivableForm: React.FC<{
     };
 
     const handleSettle = (item: LegacyReceivable) => {
-        if (window.confirm(`L melunasi piutang ${item.customer} sejumlah ${formatCurrency(item.amount)}? Ini akan tercatat sebagai pengeluaran baru.`)) {
+        if (window.confirm(`Anda akan melunasi piutang ${item.customer} sejumlah ${formatCurrency(item.amount)}? Ini akan tercatat sebagai pengeluaran baru.`)) {
             onSettle(item);
         }
     };
@@ -211,12 +213,13 @@ const LegacyReceivableForm: React.FC<{
     )
 };
 
-const Reports: React.FC<ReportsProps> = ({ 
+const Reports: React.FC<ReportsProps> = (props) => {
+    const { 
     allOrders, expenses, receivables, products, customers, inventory, categories, finishings,
     menuPermissions, legacyIncome, legacyExpense, legacyReceivables, assets, debts, notificationSettings,
     onSetLegacyIncome, onSetLegacyExpense, onAddLegacyReceivable, onUpdateLegacyReceivable,
     onDeleteLegacyReceivable, onSettleLegacyReceivable, onAddAsset, onAddDebt
-}) => {
+    } = props;
     const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`reports/${tab.key}`)), [menuPermissions]);
     const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
     const [currentPage, setCurrentPage] = useState(1);
@@ -267,6 +270,103 @@ const Reports: React.FC<ReportsProps> = ({
         setSortConfig({ key, order });
     };
 
+    // --- START P&L LOGIC ---
+    const [pnlFilterType, setPnlFilterType] = useState<'month' | 'year'>('month');
+    const [pnlSelectedMonth, setPnlSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [pnlSelectedYear, setPnlSelectedYear] = useState(new Date().getFullYear());
+
+    const { pnlStartDate, pnlEndDate } = useMemo(() => {
+        if (pnlFilterType === 'year') {
+            return { pnlStartDate: `${pnlSelectedYear}-01-01`, pnlEndDate: `${pnlSelectedYear}-12-31` };
+        }
+        const year = parseInt(pnlSelectedMonth.slice(0, 4));
+        const month = parseInt(pnlSelectedMonth.slice(5, 7));
+        const firstDay = new Date(year, month - 1, 1).toISOString().slice(0, 10);
+        const lastDay = new Date(year, month, 0).toISOString().slice(0, 10);
+        return { pnlStartDate: firstDay, pnlEndDate: lastDay };
+    }, [pnlFilterType, pnlSelectedMonth, pnlSelectedYear]);
+
+    const pnlFilteredOrders = useMemo(() => allOrders.filter(o => o.orderDate >= pnlStartDate && o.orderDate <= pnlEndDate), [allOrders, pnlStartDate, pnlEndDate]);
+    const pnlFilteredExpenses = useMemo(() => expenses.filter(e => e.date >= pnlStartDate && e.date <= pnlEndDate), [expenses, pnlStartDate, pnlEndDate]);
+
+    const pnlSummary = useMemo(() => {
+        const totalSales = pnlFilteredOrders.reduce((sum, order) => sum + order.totalPrice, 0);
+        const totalExpenses = pnlFilteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+        return { totalSales, totalExpenses, profit: totalSales - totalExpenses };
+    }, [pnlFilteredOrders, pnlFilteredExpenses]);
+
+     const pnlIncomeTableData = useMemo(() => {
+        const incomeByCategory = new Map<string, number>();
+        const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = { 'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate' };
+        
+        pnlFilteredOrders.forEach(order => {
+            const customerData = customers.find(c => c.name === order.customer);
+            const customerLevel = customerData ? customerData.level : 'End Customer';
+            const priceKey = priceLevelMap[customerLevel];
+            let unroundedTotal = 0;
+
+            const itemPrices = order.orderItems.map(item => {
+                if (!item.productId) return { category: 'Lain-lain', price: 0 };
+                const productInfo = products.find(p => p.id === item.productId);
+                if (!productInfo) return { category: 'Lain-lain', price: 0 };
+                const finishingInfo = finishings.find(f => f.name === item.finishing);
+                const categoryInfo = categories.find(c => c.name === productInfo.category);
+                const isAreaBased = categoryInfo?.unitType === 'Per Luas';
+                let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
+                const finishingPrice = finishingInfo ? finishingInfo.price : 0;
+                let priceMultiplier = isAreaBased ? (parseFloat(item.length) || 0) * (parseFloat(item.width) || 0) : 1;
+                const itemTotal = (materialPrice * priceMultiplier + finishingPrice) * item.qty;
+                unroundedTotal += itemTotal;
+                return { category: productInfo.category, price: itemTotal };
+            });
+
+            const roundingDifference = order.totalPrice - unroundedTotal;
+            itemPrices.forEach(itemPrice => {
+                let finalPrice = itemPrice.price;
+                if (unroundedTotal > 0) finalPrice += (itemPrice.price / unroundedTotal) * roundingDifference;
+                incomeByCategory.set(itemPrice.category, (incomeByCategory.get(itemPrice.category) || 0) + finalPrice);
+            });
+        });
+        
+        categories.forEach(cat => { if (!incomeByCategory.has(cat.name)) incomeByCategory.set(cat.name, 0); });
+        return Array.from(incomeByCategory.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
+    }, [pnlFilteredOrders, products, categories, customers, finishings]);
+
+    const pnlExpenseTableData = useMemo(() => {
+        const data = new Map<string, number>();
+        pnlFilteredExpenses.forEach(exp => { data.set(exp.category, (data.get(exp.category) || 0) + exp.amount); });
+        return Array.from(data.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
+    }, [pnlFilteredExpenses]);
+
+    const pnlSalesChartData = useMemo(() => {
+        if (pnlFilterType === 'month') {
+            const daysInMonth = new Date(parseInt(pnlSelectedMonth.slice(0, 4)), parseInt(pnlSelectedMonth.slice(5, 7)), 0).getDate();
+            const dailyData = Array.from({ length: daysInMonth }, (_, i) => ({ name: `${i + 1}`, Penjualan: 0 }));
+            pnlFilteredOrders.forEach(order => {
+                const day = new Date(order.orderDate).getUTCDate() - 1;
+                if (dailyData[day]) dailyData[day].Penjualan += order.totalPrice;
+            });
+            return dailyData;
+        } else {
+            const monthlyData = [{ name: 'Jan', Penjualan: 0 }, { name: 'Feb', Penjualan: 0 }, { name: 'Mar', Penjualan: 0 }, { name: 'Apr', Penjualan: 0 }, { name: 'Mei', Penjualan: 0 }, { name: 'Jun', Penjualan: 0 }, { name: 'Jul', Penjualan: 0 }, { name: 'Ags', Penjualan: 0 }, { name: 'Sep', Penjualan: 0 }, { name: 'Okt', Penjualan: 0 }, { name: 'Nov', Penjualan: 0 }, { name: 'Des', Penjualan: 0 }];
+            pnlFilteredOrders.forEach(order => {
+                const month = new Date(order.orderDate).getUTCMonth();
+                if (monthlyData[month]) monthlyData[month].Penjualan += order.totalPrice;
+            });
+            return monthlyData;
+        }
+    }, [pnlFilterType, pnlSelectedMonth, pnlSelectedYear, pnlFilteredOrders]);
+    
+    const pnlExpensePieData = useMemo(() => {
+        const expenseByCategory = pnlFilteredExpenses.reduce((acc, expense) => {
+            acc[expense.category] = (acc[expense.category] || 0) + expense.amount;
+            return acc;
+        }, {} as Record<string, number>);
+        return Object.entries(expenseByCategory).map(([name, value]) => ({ name, value })).filter(item => item.value > 0);
+    }, [pnlFilteredExpenses]);
+
+    // --- END P&L LOGIC ---
+
     const handleExport = () => {
         const dateRange = { startDate: filterStartDate, endDate: filterEndDate };
         switch(activeTab) {
@@ -299,12 +399,18 @@ const Reports: React.FC<ReportsProps> = ({
     };
 
     const handlePrintReport = () => {
-        if (activeTab !== 'sales' && activeTab !== 'receivables') {
+        if (activeTab !== 'sales' && activeTab !== 'receivables' && activeTab !== 'profitAndLoss') {
             return;
         }
 
-        const reportTitle = activeTab === 'sales' ? 'Laporan Penjualan' : 'Laporan Piutang';
-        const period = `Periode: ${new Date(filterStartDate).toLocaleDateString('id-ID')} - ${new Date(filterEndDate).toLocaleDateString('id-ID')}`;
+        const reportTitle = 
+            activeTab === 'sales' ? 'Laporan Penjualan' : 
+            activeTab === 'receivables' ? 'Laporan Piutang' : 
+            'Laporan Laba Rugi';
+        
+        const period = activeTab === 'profitAndLoss' ? 
+            (pnlFilterType === 'month' ? `Periode: ${new Date(pnlSelectedMonth + '-02').toLocaleString('id-ID', { month: 'long', year: 'numeric' })}` : `Periode: Tahun ${pnlSelectedYear}`)
+            : `Periode: ${new Date(filterStartDate).toLocaleDateString('id-ID')} - ${new Date(filterEndDate).toLocaleDateString('id-ID')}`;
 
         const headerHtml = `
             <div class="header">
@@ -414,6 +520,36 @@ const Reports: React.FC<ReportsProps> = ({
                     </table>
                 </div>
             `;
+        } else if (activeTab === 'profitAndLoss') {
+            const incomeRows = pnlIncomeTableData.map(item => `<tr><td>${item.name}</td><td class="currency">${formatCurrency(item.total)}</td></tr>`).join('');
+            const expenseRows = pnlExpenseTableData.map(item => `<tr><td>${item.name}</td><td class="currency">${formatCurrency(item.total)}</td></tr>`).join('');
+
+            tableHtml = `
+                <div class="pnl-container">
+                    <div class="pnl-column">
+                        <h3>Pendapatan</h3>
+                        <table>
+                            <thead><tr><th>Kategori</th><th class="currency">Total</th></tr></thead>
+                            <tbody>${incomeRows}</tbody>
+                            <tfoot><tr><th>TOTAL PENDAPATAN</th><th class="currency">${formatCurrency(pnlSummary.totalSales)}</th></tr></tfoot>
+                        </table>
+                    </div>
+                    <div class="pnl-column">
+                        <h3>Pengeluaran</h3>
+                        <table>
+                            <thead><tr><th>Kategori</th><th class="currency">Total</th></tr></thead>
+                            <tbody>${expenseRows}</tbody>
+                             <tfoot><tr><th>TOTAL PENGELUARAN</th><th class="currency">${formatCurrency(pnlSummary.totalExpenses)}</th></tr></tfoot>
+                        </table>
+                    </div>
+                </div>
+            `;
+            summaryHtml = `
+                <div class="summary-box pnl-summary">
+                    <strong>Laba Rugi:</strong>
+                    <strong>${formatCurrency(pnlSummary.profit)}</strong>
+                </div>
+            `;
         }
         
         const printContent = `
@@ -422,21 +558,21 @@ const Reports: React.FC<ReportsProps> = ({
                     <title>${reportTitle}</title>
                     <style>
                         body { font-family: Arial, sans-serif; font-size: 10pt; color: #333; }
-                        .page { width: 270mm; min-height: 190mm; padding: 10mm; margin: 5mm auto; background: white; }
+                        .page { width: 190mm; min-height: 270mm; padding: 10mm; margin: 5mm auto; background: white; }
                         .header, .customer-info { display: flex; justify-content: space-between; align-items: flex-start; }
                         .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
                         hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
                         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
                         th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; }
-                        th { background-color: #f2f2f2; }
+                        th, tfoot th { background-color: #f2f2f2; }
+                        tfoot { font-weight: bold; }
                         .currency { text-align: right; }
                         .summary-box { text-align: right; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; }
-                        .print-button-container {
-                            position: fixed; top: 20px; right: 20px; text-align: center; z-index: 100;
-                        }
-                        .print-button-container button {
-                            background-color: #ec4899; color: white; font-weight: bold; padding: 8px 24px; border-radius: 8px; border: none; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-                        }
+                        .print-button-container { position: fixed; top: 20px; right: 20px; text-align: center; z-index: 100; }
+                        .print-button-container button { background-color: #ec4899; color: white; font-weight: bold; padding: 8px 24px; border-radius: 8px; border: none; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+                        .pnl-container { display: flex; gap: 20px; align-items: flex-start; }
+                        .pnl-column { flex: 1; }
+                        .pnl-summary { text-align: center; font-size: 14pt; padding: 10px; background-color: #f2f2f2; display: flex; justify-content: space-between; }
                         @media print { 
                             .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-after: always; }
                             .print-button-container { display: none; }
@@ -793,7 +929,6 @@ const Reports: React.FC<ReportsProps> = ({
         }
     };
 
-
     // --- RENDER METHODS FOR TABS ---
 
     const renderFinalRecap = () => (
@@ -1071,10 +1206,40 @@ const Reports: React.FC<ReportsProps> = ({
             </div>
         );
     };
+    
+    const renderProfitAndLoss = () => {
+        const PIE_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef', '#14b8a6'];
+        
+        return (
+            <div className="space-y-8">
+                <div className="flex justify-start items-center space-x-4">
+                    <div className="flex items-center space-x-2"><input type="radio" id="pnl-month" name="pnl-filter" value="month" checked={pnlFilterType === 'month'} onChange={() => setPnlFilterType('month')} /><label htmlFor="pnl-month">Bulan</label><input type="month" value={pnlSelectedMonth} onChange={e => setPnlSelectedMonth(e.target.value)} disabled={pnlFilterType !== 'month'} className="p-2 border rounded-md text-sm text-gray-600" /></div>
+                     <div className="flex items-center space-x-2"><input type="radio" id="pnl-year" name="pnl-filter" value="year" checked={pnlFilterType === 'year'} onChange={() => setPnlFilterType('year')} /><label htmlFor="pnl-year">Tahun</label><input type="number" value={pnlSelectedYear} onChange={e => setPnlSelectedYear(Number(e.target.value))} disabled={pnlFilterType !== 'year'} className="p-2 border rounded-md text-sm text-gray-600 w-28" placeholder="YYYY" /></div>
+                </div>
+    
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <ReportStatCard icon={<CurrencyDollarIcon />} title="Penjualan" value={formatCurrency(pnlSummary.totalSales)} gradient="bg-gradient-to-br from-green-500 to-emerald-500" />
+                     <ReportStatCard icon={<ReceiptTaxIcon />} title="Pengeluaran" value={formatCurrency(pnlSummary.totalExpenses)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
+                     <ReportStatCard icon={<ChartBarIcon />} title="Laba Rugi" value={formatCurrency(pnlSummary.profit)} gradient="bg-gradient-to-br from-amber-500 to-orange-500" />
+                </div>
+    
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="lg:col-span-2 bg-white p-4 rounded-lg border h-96"><h3 className="font-bold text-gray-700 mb-4">Grafik Penjualan</h3><ResponsiveContainer width="100%" height="90%"><AreaChart data={pnlSalesChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}><defs><linearGradient id="salesGradientPnl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22c55e" stopOpacity={0.8}/><stop offset="95%" stopColor="#22c55e" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `Rp${Number(value)/1000000} Jt`}/><Tooltip formatter={(value: number) => formatCurrency(value)}/><Area type="monotone" dataKey="Penjualan" stroke="#22c55e" strokeWidth={2} fill="url(#salesGradientPnl)" /></AreaChart></ResponsiveContainer></div>
+                    <div className="bg-white p-4 rounded-lg border h-96"><h3 className="font-bold text-gray-700 mb-4">Kategori Pengeluaran</h3>{pnlExpensePieData.length > 0 ? (<ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pnlExpensePieData} cx="50%" cy="45%" labelLine={false} outerRadius={80} fill="#8884d8" dataKey="value" nameKey="name" label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`} >{pnlExpensePieData.map((entry, index) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />))}</Pie><Tooltip formatter={(value: number) => [formatCurrency(value), '']}/></PieChart></ResponsiveContainer>) : (<div className="flex items-center justify-center h-full text-gray-500">Tidak ada data pengeluaran.</div>)}</div>
+                </div>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div><h3 className="font-bold text-lg mb-2">Rincian Pendapatan</h3><div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Kategori</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlIncomeTableData.map(item => (<tr key={item.name}><td className="p-3">{item.name}</td><td className="p-3 text-right font-medium">{formatCurrency(item.total)}</td></tr>))}</tbody><tfoot className="bg-gray-50 font-bold"><tr><td className="p-3">TOTAL PENDAPATAN</td><td className="p-3 text-right">{formatCurrency(pnlSummary.totalSales)}</td></tr></tfoot></table></div></div>
+                    <div><h3 className="font-bold text-lg mb-2">Rincian Pengeluaran</h3><div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Kategori</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlExpenseTableData.map(item => (<tr key={item.name}><td className="p-3">{item.name}</td><td className="p-3 text-right font-medium">{formatCurrency(item.total)}</td></tr>))}</tbody><tfoot className="bg-gray-50 font-bold"><tr><td className="p-3">TOTAL PENGELUARAN</td><td className="p-3 text-right">{formatCurrency(pnlSummary.totalExpenses)}</td></tr></tfoot></table></div></div>
+                </div>
+            </div>
+        );
+    };
 
     const renderContent = () => {
         switch (activeTab) {
             case 'finalRecap': return renderFinalRecap();
+            case 'profitAndLoss': return renderProfitAndLoss();
             case 'sales': return renderSales();
             case 'receivables': return renderReceivables();
             case 'inventory': return renderInventory();
@@ -1104,7 +1269,7 @@ const Reports: React.FC<ReportsProps> = ({
                     <button 
                         onClick={handlePrintReport}
                         className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg text-sm font-semibold disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-                        disabled={!['sales', 'receivables'].includes(activeTab)}
+                        disabled={!['sales', 'receivables', 'profitAndLoss'].includes(activeTab)}
                     >
                         <PrinterIcon className="h-4 w-4" /> <span>Unduh PDF</span>
                     </button>

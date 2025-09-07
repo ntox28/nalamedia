@@ -49,6 +49,7 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: <ChartBarIcon />,
     tabs: [
       { key: 'finalRecap', label: 'Final Rekapitulasi' },
+      { key: 'profitAndLoss', label: 'Laba Rugi' },
       { key: 'sales', label: 'Penjualan' },
       { key: 'receivables', label: 'Piutang' },
       { key: 'inventory', label: 'Stok' },
