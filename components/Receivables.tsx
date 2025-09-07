@@ -1,16 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem } from '../types';
+import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem, type LegacyReceivable } from '../types';
 import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
 
-type DisplayReceivable = ReceivableItem & { isUnprocessed?: boolean };
+type DisplayReceivable = ReceivableItem & { isUnprocessed?: boolean; isLegacy?: boolean; legacyData?: LegacyReceivable };
 
 // --- START: Reusable Components ---
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
-// FIX: Add formatDate helper function for use in printing reports.
 const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 interface StatCardProps {
@@ -152,7 +151,7 @@ const PaymentModal: React.FC<{
     const total = editedItems.reduce((sum, item) => sum + calculateItemPrice(item), 0);
     // Apply rounding
     return Math.ceil(total / 500) * 500;
-  }, [editedItems, order.customer, products, finishings, customers, categories]);
+  }, [editedItems, order.customer, products, finishings, customers, categories, order.amount]);
 
 
   const { totalPaid, totalSetelahDiskon, sisaTagihan } = useMemo(() => {
@@ -250,25 +249,33 @@ const PaymentModal: React.FC<{
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
-                                {editedItems?.map((item, index) => {
-                                    const product = products.find(p => p.id === item.productId);
-                                    const itemTotal = calculateItemPrice(item);
-                                    return (
-                                        <tr key={item.id}>
-                                            <td className="py-2 px-3">
-                                                <p className="font-semibold">{item.description || '-'}</p>
-                                                <p className="text-xs text-gray-500">{product?.name || 'N/A'}</p>
-                                            </td>
-                                            <td className="py-2 px-3 text-center">{item.qty} Pcs</td>
-                                            <td className="py-2 px-3 text-right font-mono flex items-center justify-end gap-2">
-                                                <span>{new Intl.NumberFormat('id-ID').format(itemTotal)}</span>
-                                                <button onClick={() => handlePriceOverride(item.id)} title="Ubah Harga Item" className="p-1 text-gray-400 hover:text-blue-600">
-                                                    <PencilIcon className="h-3 w-3" />
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                               {editedItems ? (
+                                   editedItems.map((item, index) => {
+                                        const product = products.find(p => p.id === item.productId);
+                                        const itemTotal = calculateItemPrice(item);
+                                        return (
+                                            <tr key={item.id}>
+                                                <td className="py-2 px-3">
+                                                    <p className="font-semibold">{item.description || '-'}</p>
+                                                    <p className="text-xs text-gray-500">{product?.name || 'N/A'}</p>
+                                                </td>
+                                                <td className="py-2 px-3 text-center">{item.qty} Pcs</td>
+                                                <td className="py-2 px-3 text-right font-mono flex items-center justify-end gap-2">
+                                                    <span>{new Intl.NumberFormat('id-ID').format(itemTotal)}</span>
+                                                    <button onClick={() => handlePriceOverride(item.id)} title="Ubah Harga Item" className="p-1 text-gray-400 hover:text-blue-600">
+                                                        <PencilIcon className="h-3 w-3" />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                               ) : (
+                                <tr>
+                                    <td colSpan={3} className="py-3 px-3 italic text-gray-600">
+                                        {order.legacyData?.description || 'Data order lama.'}
+                                    </td>
+                                </tr>
+                               )}
                             </tbody>
                         </table>
                     </div>
@@ -708,6 +715,8 @@ interface ReceivablesProps {
   onUpdateDueDate: (orderId: string, newDueDate: string) => void;
   onBulkUpdateDueDate: (orderIds: string[], newDueDate: string) => void;
   notificationSettings: NotificationSettings;
+  legacyReceivables: LegacyReceivable[];
+  onPayLegacyReceivable: (legacyItem: LegacyReceivable, paymentDetails: Payment, newDiscount: number) => void;
 }
 
 const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
@@ -721,7 +730,8 @@ const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> =
 
 const Receivables: React.FC<ReceivablesProps> = ({ 
     receivables, unprocessedOrders, allOrders, boardData, products, finishings, customers, categories, expenses, initialCash, paymentMethods,
-    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings
+    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings,
+    legacyReceivables, onPayLegacyReceivable
 }) => {
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<DisplayReceivable | null>(null);
@@ -752,15 +762,11 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [filterEndDate, setFilterEndDate] = useState('');
 
   const allDisplayItems: DisplayReceivable[] = useMemo(() => {
-    // All receivables are always displayed.
-    const processedItems: DisplayReceivable[] = receivables.map(r => ({ ...r, isUnprocessed: false }));
-
-    // Get the IDs of orders that already have a receivable record.
+    const processedItems: DisplayReceivable[] = receivables.map(r => ({ ...r, isUnprocessed: false, isLegacy: false }));
     const receivableIds = new Set(receivables.map(r => r.id));
 
-    // From the unprocessed orders, only include those that DO NOT have a receivable yet.
     const unprocessedOnlyItems: DisplayReceivable[] = unprocessedOrders
-        .filter(order => !receivableIds.has(order.id)) // This is the key fix
+        .filter(order => !receivableIds.has(order.id))
         .map(order => ({
             id: order.id,
             customer: order.customer,
@@ -771,11 +777,25 @@ const Receivables: React.FC<ReceivablesProps> = ({
             payments: [],
             discount: 0,
             isUnprocessed: true,
+            isLegacy: false,
         }));
 
-    // Combine both lists. Now there are no duplicates.
-    return [...processedItems, ...unprocessedOnlyItems];
-  }, [receivables, unprocessedOrders]);
+    const legacyItems: DisplayReceivable[] = legacyReceivables.map(legacy => ({
+        id: `legacy-${legacy.nota_id}`, // Use custom nota_id for display ID
+        customer: legacy.customer,
+        amount: legacy.amount,
+        due: legacy.order_date,
+        paymentStatus: 'Belum Lunas',
+        productionStatus: 'Data Lama',
+        payments: [],
+        discount: 0,
+        isUnprocessed: false,
+        isLegacy: true,
+        legacyData: legacy,
+    }));
+
+    return [...processedItems, ...unprocessedOnlyItems, ...legacyItems];
+  }, [receivables, unprocessedOrders, legacyReceivables]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -789,7 +809,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const filteredItems = useMemo(() => {
     return allDisplayItems.filter(item => {
       const order = allOrders.find(o => o.id === item.id);
-      if (!order) return true; // Keep items even if full order not found yet
+      const orderDate = item.isLegacy ? item.legacyData!.order_date : order?.orderDate;
 
       const lowerCaseSearch = filterSearch.toLowerCase();
       if (filterSearch && !item.id.toLowerCase().includes(lowerCaseSearch) && !item.customer.toLowerCase().includes(lowerCaseSearch)) {
@@ -801,15 +821,24 @@ const Receivables: React.FC<ReceivablesProps> = ({
       if (filterStatus && item.paymentStatus !== filterStatus) {
         return false;
       }
-      const orderDate = order.orderDate;
-      if (filterStartDate && orderDate < filterStartDate) {
+      if (filterStartDate && orderDate && orderDate < filterStartDate) {
         return false;
       }
-      if (filterEndDate && orderDate > filterEndDate) {
+      if (filterEndDate && orderDate && orderDate > filterEndDate) {
         return false;
       }
       return true;
-    }).sort((a, b) => b.id.localeCompare(a.id));
+    }).sort((a, b) => {
+        // Primary sort: non-legacy items first
+        if (a.isLegacy && !b.isLegacy) return 1;
+        if (!a.isLegacy && b.isLegacy) return -1;
+        
+        // Secondary sort: by ID (nota number) descending
+        // For legacy items, we need a consistent way to sort. Using ID is fine.
+        const idA = a.isLegacy ? a.legacyData!.id.toString() : a.id;
+        const idB = b.isLegacy ? b.legacyData!.id.toString() : b.id;
+        return idB.localeCompare(idA, undefined, { numeric: true });
+    });
   }, [allDisplayItems, allOrders, filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
   
   const paginatedItems = useMemo(() => {
@@ -953,7 +982,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
   };
   
   const handleConfirmPayment = (orderId: string, paymentDetails: Payment, discountAmount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => {
-    if (selectedOrder?.isUnprocessed) {
+    if (selectedOrder?.isLegacy && selectedOrder.legacyData) {
+        onPayLegacyReceivable(selectedOrder.legacyData, paymentDetails, discountAmount);
+    } else if (selectedOrder?.isUnprocessed) {
       onPayUnprocessedOrder(orderId, paymentDetails, discountAmount, updatedItems, newTotalAmount);
     } else {
       onProcessPayment(orderId, paymentDetails, discountAmount, updatedItems, newTotalAmount);
@@ -1748,6 +1779,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
       case 'Telah Dikirim': return 'bg-gray-100 text-gray-800';
       case 'Siap Ambil': return 'bg-teal-100 text-teal-800';
       case 'Proses Cetak': return 'bg-pink-100 text-pink-800';
+      case 'Data Lama': return 'bg-indigo-100 text-indigo-800';
       case 'Dalam Antrian':
       default:
         return 'bg-fuchsia-100 text-fuchsia-800';
@@ -1763,7 +1795,6 @@ const Receivables: React.FC<ReceivablesProps> = ({
       onUpdateDueDate(orderId, newDueDate);
       setEditingDueDateId(null);
   };
-    // FIX: Add handlePrintCustomerReport function definition.
     const handlePrintCustomerReport = () => {
         if (!filterCustomer) {
             alert("Silakan pilih pelanggan dari filter terlebih dahulu.");
@@ -2086,8 +2117,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
             </thead>
             <tbody className="divide-y divide-gray-200">
               {paginatedItems.length > 0 ? paginatedItems.map(item => {
-                const fullOrder = allOrders.find(o => o.id === item.id);
-                const orderDate = fullOrder ? new Date(fullOrder.orderDate).toLocaleDateString('id-ID') : 'N/A';
+                const orderDate = item.isLegacy ? new Date(item.legacyData!.order_date).toLocaleDateString('id-ID') : (allOrders.find(o => o.id === item.id) ? new Date(allOrders.find(o => o.id === item.id)!.orderDate).toLocaleDateString('id-ID') : 'N/A');
 
                 return (
                   <tr key={item.id} className="hover:bg-gray-50">
@@ -2143,6 +2173,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                               className="p-1.5 text-gray-500 rounded-full hover:bg-gray-200 focus:outline-none"
                               aria-haspopup="true"
                               aria-expanded={actionsMenu === item.id}
+                              disabled={item.isLegacy}
                           >
                               <span className="sr-only">Opsi</span>
                               <EllipsisVerticalIcon className="h-5 w-5" />

@@ -15,15 +15,15 @@ import Payroll from './components/Payroll';
 import Login from './components/Login';
 import { supabase } from './supabaseClient';
 import { type Session } from '@supabase/supabase-js';
-import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem } from './types';
+import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem } from './types';
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
 import { ShoppingCartIcon, ExclamationTriangleIcon, CreditCardIcon } from './components/Icons';
 
 console.log("Build: Script is being parsed and component is about to be created.");
 
 const DEFAULT_MENU_PERMISSIONS: MenuPermissions = {
-    Kasir: ["dashboard", "dashboard/penjualan", "sales", "receivables"],
-    Office: ["dashboard", "dashboard/penjualan", "dashboard/produksi", "sales", "receivables", "expenses", "payroll", "payroll/attendance", "payroll/summary", "masterData", "masterData/products", "masterData/categories", "masterData/finishings", "masterData/customers", "masterData/suppliers", "masterData/karyawan", "reports", "reports/sales", "reports/receivables", "reports/inventory", "reports/assetsDebts", "reports/dataPenjualanLama", "reports/finalRecap"],
+    Kasir: ["dashboard", "dashboard/penjualan", "sales", "receivables", "reports", "reports/dataPiutangLama"],
+    Office: ["dashboard", "dashboard/penjualan", "dashboard/produksi", "sales", "receivables", "expenses", "payroll", "payroll/attendance", "payroll/summary", "masterData", "masterData/products", "masterData/categories", "masterData/finishings", "masterData/customers", "masterData/suppliers", "masterData/karyawan", "reports", "reports/sales", "reports/receivables", "reports/inventory", "reports/assetsDebts", "reports/dataPenjualanLama", "reports/finalRecap", "reports/dataPiutangLama"],
     Produksi: ["dashboard", "dashboard/produksi", "production", "inventory"],
     Admin: ALL_PERMISSIONS_LIST
 };
@@ -76,8 +76,8 @@ const App: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
   const [menuPermissions, setMenuPermissions] = useState<MenuPermissions>(DEFAULT_MENU_PERMISSIONS);
-  const [legacyIncome, setLegacyIncome] = useState<LegacyIncome | null>(null);
-  const [legacyExpense, setLegacyExpense] = useState<LegacyExpense | null>(null);
+  const [legacyMonthlyIncomes, setLegacyMonthlyIncomes] = useState<LegacyMonthlyIncome[]>([]);
+  const [legacyMonthlyExpenses, setLegacyMonthlyExpenses] = useState<LegacyMonthlyExpense[]>([]);
   const [legacyReceivables, setLegacyReceivables] = useState<LegacyReceivable[]>([]);
   const [assets, setAssets] = useState<AssetItem[]>([]);
   const [debts, setDebts] = useState<DebtItem[]>([]);
@@ -112,8 +112,8 @@ const App: React.FC = () => {
     setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
     setStoreInfo(DEFAULT_STORE_INFO);
     setPaymentMethods(DEFAULT_PAYMENT_METHODS);
-    setLegacyIncome(null);
-    setLegacyExpense(null);
+    setLegacyMonthlyIncomes([]);
+    setLegacyMonthlyExpenses([]);
     setLegacyReceivables([]);
     setAssets([]);
     setDebts([]);
@@ -140,6 +140,8 @@ const App: React.FC = () => {
         inventory: supabase.from('inventory').select('*'),
         expenses: supabase.from('expenses').select('*'),
         profiles: supabase.from('profiles').select('id, uuid, name, level'),
+        legacy_data: supabase.from('legacy_data').select('*'),
+        legacy_expense: supabase.from('legacy_expense').select('*'),
         legacy_receivables: supabase.from('legacy_receivables').select('*'),
         assets: supabase.from('assets').select('*'),
         debts: supabase.from('debts').select('*'),
@@ -184,6 +186,8 @@ const App: React.FC = () => {
     }));
     setUsers(mappedProfiles);
 
+    setLegacyMonthlyIncomes(dataMap.legacy_data);
+    setLegacyMonthlyExpenses(dataMap.legacy_expense);
     setLegacyReceivables(dataMap.legacy_receivables);
     setAssets(dataMap.assets);
     setDebts(dataMap.debts);
@@ -213,11 +217,6 @@ const App: React.FC = () => {
     } else {
         setInitialCash(0);
     }
-    
-    const legacyIncomeSetting = settings.find(s => s.key === 'legacyIncome');
-    const legacyExpenseSetting = settings.find(s => s.key === 'legacyExpense');
-    if(legacyIncomeSetting && legacyIncomeSetting.value.amount > 0) setLegacyIncome(legacyIncomeSetting.value); else setLegacyIncome(null);
-    if(legacyExpenseSetting && legacyExpenseSetting.value.amount > 0) setLegacyExpense(legacyExpenseSetting.value); else setLegacyExpense(null);
 
     // An order is only "processed" when its status is NOT 'Dalam Antrian'.
     // It remains "unprocessed" even if paid (DP), as long as it hasn't been sent to production.
@@ -880,16 +879,66 @@ const App: React.FC = () => {
   const handleUpdatePayroll = (p: PayrollRecord) => genericUpdateHandler('payroll_records', p, setPayrollRecords);
   const handleRevertPayroll = (id: number) => genericDeleteHandler('payroll_records', id, setPayrollRecords);
   
-  const handleSetLegacyIncome = (data: LegacyIncome | null) => { supabase.from('app_settings').upsert({ key: 'legacyIncome', value: data }, { onConflict: 'key' }).then(() => setLegacyIncome(data)); };
-  const handleSetLegacyExpense = (data: LegacyExpense | null) => { supabase.from('app_settings').upsert({ key: 'legacyExpense', value: data }, { onConflict: 'key' }).then(() => setLegacyExpense(data)); };
+  const handleAddLegacyMonthlyIncome = (i: Omit<LegacyMonthlyIncome, 'id'>) => genericAddHandler('legacy_data', i, setLegacyMonthlyIncomes as any);
+  const handleUpdateLegacyMonthlyIncome = (i: LegacyMonthlyIncome) => genericUpdateHandler('legacy_data', i, setLegacyMonthlyIncomes as any);
+  const handleDeleteLegacyMonthlyIncome = (id: number) => genericDeleteHandler('legacy_data', id, setLegacyMonthlyIncomes as any);
+  
+  const handleAddLegacyMonthlyExpense = (e: Omit<LegacyMonthlyExpense, 'id'>) => genericAddHandler('legacy_expense', e, setLegacyMonthlyExpenses as any);
+  const handleUpdateLegacyMonthlyExpense = (e: LegacyMonthlyExpense) => genericUpdateHandler('legacy_expense', e, setLegacyMonthlyExpenses as any);
+  const handleDeleteLegacyMonthlyExpense = (id: number) => genericDeleteHandler('legacy_expense', id, setLegacyMonthlyExpenses as any);
+
   const handleAddLegacyReceivable = (r: Omit<LegacyReceivable, 'id'>) => genericAddHandler('legacy_receivables', r, setLegacyReceivables);
   const handleUpdateLegacyReceivable = (r: LegacyReceivable) => genericUpdateHandler('legacy_receivables', r, setLegacyReceivables);
   const handleDeleteLegacyReceivable = (id: number) => genericDeleteHandler('legacy_receivables', id, setLegacyReceivables);
-  const handleSettleLegacyReceivable = async (item: LegacyReceivable) => {
-    const newExpense: Omit<ExpenseItem, 'id'> = { name: `Bayar Piutang Lama: ${item.customer}`, category: "Lain-lain", amount: item.amount, date: new Date().toISOString().substring(0, 10) };
-    await handleAddExpense(newExpense);
-    await handleDeleteLegacyReceivable(item.id);
-  };
+
+  const handlePayLegacyReceivable = useCallback(async (legacyItem: LegacyReceivable, paymentDetails: Payment, newDiscount: number) => {
+    // 1. Create a corresponding new order with a custom "Nota-XXXXX" ID
+    const notaNumber = legacyItem.nota_id.toString().padStart(5, '0');
+    const newNotaId = `Nota-${notaNumber}`;
+
+    const newOrder: SavedOrder = {
+        id: newNotaId,
+        customer: legacyItem.customer,
+        orderDate: legacyItem.order_date,
+        orderItems: [{
+            id: Date.now(), productId: null, finishing: 'Tanpa Finishing',
+            description: legacyItem.description,
+            length: legacyItem.length ? legacyItem.length.toString() : '0',
+            width: legacyItem.width ? legacyItem.width.toString() : '0',
+            qty: legacyItem.qty,
+        }],
+        details: legacyItem.description,
+        totalPrice: legacyItem.amount,
+    };
+    
+    const { data: orderData, error: orderError } = await supabase.from('orders').insert(newOrder).select().single();
+    if (orderError || !orderData) { alert(`Gagal membuat order baru dari data lama: ${orderError?.message}`); return; }
+    
+    // 2. Create a new receivable with payment info
+    const totalPaid = paymentDetails.amount;
+    let newPaymentStatus: PaymentStatus = totalPaid + newDiscount >= legacyItem.amount ? 'Lunas' : 'Belum Lunas';
+
+    const dueDate = new Date(legacyItem.order_date);
+    dueDate.setDate(dueDate.getDate() + notificationSettings.defaultDueDateDays);
+
+    const newReceivable: ReceivableItem = {
+        id: newOrder.id, customer: newOrder.customer, amount: newOrder.totalPrice,
+        due: dueDate.toISOString().substring(0, 10),
+        paymentStatus: newPaymentStatus,
+        productionStatus: 'Telah Dikirim', // Set as delivered since it's legacy data
+        payments: [paymentDetails],
+        discount: newDiscount,
+    };
+
+    const { error: receivableError } = await supabase.from('receivables').insert(newReceivable);
+    if (receivableError) { alert(`Order baru dibuat, tapi gagal membuat data pembayaran: ${receivableError.message}`); return; }
+
+    // 3. Delete the legacy receivable
+    const { error: deleteError } = await supabase.from('legacy_receivables').delete().eq('id', legacyItem.id);
+    if (deleteError) { alert(`Pembayaran berhasil, tapi gagal menghapus data piutang lama: ${deleteError.message}`); }
+
+  }, [notificationSettings]);
+
   const handleAddAsset = (a: Omit<AssetItem, 'id'>) => genericAddHandler('assets', a, setAssets);
   const handleAddDebt = (d: Omit<DebtItem, 'id'>) => genericAddHandler('debts', d, setDebts);
   
@@ -909,14 +958,14 @@ const App: React.FC = () => {
     switch (activeMenu) {
       case 'dashboard': return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} />;
       case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} receivables={receivables} />;
-      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
+      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} legacyReceivables={legacyReceivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onPayLegacyReceivable={handlePayLegacyReceivable} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
       case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
       case 'production': return <Production boardData={boardData} allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} onProductionMove={handleProductionMove} onDeliverOrder={handleDeliverOrder} onCancelQueue={handleCancelQueue} />;
       case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onDeleteAttendance={handleDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} />;
       case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} onAddProduct={handleAddProduct} onAddCategory={handleAddCategory} onAddFinishing={handleAddFinishing} onAddCustomer={handleAddCustomer} onAddSupplier={handleAddSupplier} onAddEmployee={handleAddEmployee} />;
       case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
-      case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyIncome={legacyIncome} legacyExpense={legacyExpense} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onSetLegacyIncome={handleSetLegacyIncome} onSetLegacyExpense={handleSetLegacyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onSettleLegacyReceivable={handleSettleLegacyReceivable} onAddAsset={handleAddAsset} onAddDebt={handleAddDebt} />;
+      case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyMonthlyIncomes={legacyMonthlyIncomes} legacyMonthlyExpenses={legacyMonthlyExpenses} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onAddLegacyMonthlyIncome={handleAddLegacyMonthlyIncome} onUpdateLegacyMonthlyIncome={handleUpdateLegacyMonthlyIncome} onDeleteLegacyMonthlyIncome={handleDeleteLegacyMonthlyIncome} onAddLegacyMonthlyExpense={handleAddLegacyMonthlyExpense} onUpdateLegacyMonthlyExpense={handleUpdateLegacyMonthlyExpense} onDeleteLegacyMonthlyExpense={handleDeleteLegacyMonthlyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onAddAsset={handleAddAsset} onAddDebt={handleAddDebt} />;
       case 'settings': return <Settings users={users} menuPermissions={menuPermissions} currentUser={profile} currentUserLevel={profile!.level} notificationSettings={notificationSettings} storeInfo={storeInfo} paymentMethods={paymentMethods} onAddUser={handleAddProfile} onUpdateUser={handleUpdateUser} onUpdateMenuPermissions={handleUpdateMenuPermissions} onUpdateNotificationSettings={handleUpdateNotificationSettings} onUpdateStoreInfo={handleUpdateStoreInfo} onUpdatePaymentMethods={handleUpdatePaymentMethods} />;
       default: return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} />;
     }

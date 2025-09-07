@@ -55,6 +55,7 @@ export const MENU_ITEMS: MenuItem[] = [
       { key: 'inventory', label: 'Stok' },
       { key: 'assetsDebts', label: 'Aset dan Hutang' },
       { key: 'dataPenjualanLama', label: 'Data Penjualan Lama' },
+      { key: 'dataPiutangLama', label: 'Data Piutang Lama' },
     ]
   },
   { 

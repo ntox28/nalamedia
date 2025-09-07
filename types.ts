@@ -132,7 +132,7 @@ export interface SavedOrder {
 export type PaymentStatus = 'Belum Lunas' | 'Lunas';
 
 // Tipe data untuk status produksi di halaman piutang
-export type ProductionStatusDisplay = 'Dalam Antrian' | 'Proses Cetak' | 'Siap Ambil' | 'Telah Dikirim';
+export type ProductionStatusDisplay = 'Dalam Antrian' | 'Proses Cetak' | 'Siap Ambil' | 'Telah Dikirim' | 'Data Lama';
 
 // Tipe data untuk setiap transaksi pembayaran
 export interface Payment {
@@ -231,22 +231,35 @@ export interface Profile {
 export type MenuPermissions = Record<UserLevel, string[]>;
 
 // --- Legacy Data Import Types ---
-export interface LegacyIncome {
-  lastDate: string;
+
+// New types for monthly legacy data
+export interface LegacyMonthlyIncome {
+  id: number;
+  month_date: string;
   amount: number;
+  description?: string;
 }
 
-export interface LegacyExpense {
-  lastDate: string;
+export interface LegacyMonthlyExpense {
+  id: number;
+  month_date: string;
   amount: number;
+  description?: string;
 }
 
+// Updated type for per-nota legacy receivables
 export interface LegacyReceivable {
-  id: number; // Simple numeric ID for legacy items
+  id: number;
+  nota_id: string;
   customer: string;
-  date: string;
+  order_date: string;
+  description: string;
+  length: number | null;
+  width: number | null;
+  qty: number;
   amount: number;
 }
+
 
 // --- Assets and Debts ---
 export interface AssetItem {
@@ -308,18 +321,21 @@ export interface ReportsProps {
   categories: CategoryData[];
   finishings: FinishingData[];
   menuPermissions: string[];
-  legacyIncome: LegacyIncome | null;
-  legacyExpense: LegacyExpense | null;
+  legacyMonthlyIncomes: LegacyMonthlyIncome[];
+  legacyMonthlyExpenses: LegacyMonthlyExpense[];
   legacyReceivables: LegacyReceivable[];
   assets: AssetItem[];
   debts: DebtItem[];
   notificationSettings: NotificationSettings;
-  onSetLegacyIncome: (data: LegacyIncome | null) => void;
-  onSetLegacyExpense: (data: LegacyExpense | null) => void;
+  onAddLegacyMonthlyIncome: (data: Omit<LegacyMonthlyIncome, 'id'>) => void;
+  onUpdateLegacyMonthlyIncome: (data: LegacyMonthlyIncome) => void;
+  onDeleteLegacyMonthlyIncome: (id: number) => void;
+  onAddLegacyMonthlyExpense: (data: Omit<LegacyMonthlyExpense, 'id'>) => void;
+  onUpdateLegacyMonthlyExpense: (data: LegacyMonthlyExpense) => void;
+  onDeleteLegacyMonthlyExpense: (id: number) => void;
   onAddLegacyReceivable: (data: Omit<LegacyReceivable, 'id'>) => void;
   onUpdateLegacyReceivable: (data: LegacyReceivable) => void;
   onDeleteLegacyReceivable: (id: number) => void;
-  onSettleLegacyReceivable: (item: LegacyReceivable) => void;
   onAddAsset: (data: Omit<AssetItem, 'id'>) => void;
   onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
 }

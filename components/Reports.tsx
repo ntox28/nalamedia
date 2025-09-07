@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyIncome, type LegacyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
 import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon } from './Icons';
 import { exportToExcel } from './reportUtils';
 import Pagination from './Pagination';
@@ -44,146 +43,178 @@ const TABS = [
     { key: 'inventory', label: 'Stok' },
     { key: 'assetsDebts', label: 'Aset dan Hutang' },
     { key: 'dataPenjualanLama', label: 'Data Penjualan Lama' },
+    { key: 'dataPiutangLama', label: 'Data Piutang Lama' },
 ];
 
-
-const LegacyIncomeForm: React.FC<{ data: LegacyIncome | null; onSave: (data: LegacyIncome | null) => void; }> = ({ data, onSave }) => {
-    const [amount, setAmount] = useState(data?.amount.toString() || '');
-    const [lastDate, setLastDate] = useState(data?.lastDate || '');
+// Reusable component for managing monthly legacy data
+const MonthlyLegacyDataForm: React.FC<{
+    title: string;
+    data: (LegacyMonthlyIncome | LegacyMonthlyExpense)[];
+    onSave: (item: Omit<LegacyMonthlyIncome, 'id'> | Omit<LegacyMonthlyExpense, 'id'>) => void;
+    onUpdate: (item: LegacyMonthlyIncome | LegacyMonthlyExpense) => void;
+    onDelete: (id: number) => void;
+}> = ({ title, data, onSave, onUpdate, onDelete }) => {
+    const [editingItem, setEditingItem] = useState<(LegacyMonthlyIncome | LegacyMonthlyExpense | null)>(null);
+    const [monthDate, setMonthDate] = useState('');
+    const [amount, setAmount] = useState('');
+    const [description, setDescription] = useState('');
 
     useEffect(() => {
-        setAmount(data?.amount.toString() || '');
-        setLastDate(data?.lastDate || '');
-    }, [data]);
+        if (editingItem) {
+            setMonthDate(editingItem.month_date.substring(0, 7)); // YYYY-MM format for month input
+            setAmount(editingItem.amount.toString());
+            setDescription(editingItem.description || '');
+        } else {
+            setMonthDate('');
+            setAmount('');
+            setDescription('');
+        }
+    }, [editingItem]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({ amount: Number(amount), lastDate });
+        const dateForDb = `${monthDate}-01`; // Store as the first day of the month
+
+        if (editingItem) {
+            onUpdate({ ...editingItem, month_date: dateForDb, amount: Number(amount), description });
+        } else {
+            onSave({ month_date: dateForDb, amount: Number(amount), description });
+        }
+        setEditingItem(null);
     };
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-4 p-4 border rounded-lg bg-gray-50">
-            <h4 className="font-semibold text-gray-700">Total Pemasukan Data Lama</h4>
+        <div className="space-y-6">
+            <form onSubmit={handleSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
+                <h4 className="font-semibold text-gray-700">{editingItem ? `Edit ${title}` : `Tambah ${title}`}</h4>
+                <div>
+                    <label className="block text-sm font-medium">Bulan & Tahun</label>
+                    <input type="month" value={monthDate} onChange={e => setMonthDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium">Nominal (Rp)</label>
+                    <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required placeholder="0" />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium">Deskripsi (Opsional)</label>
+                    <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="mt-1 w-full p-2 border rounded-md" placeholder="e.g., Pemasukan total Januari 2023" />
+                </div>
+                <div className="flex space-x-2">
+                    <button type="submit" className="w-full bg-cyan-600 text-white py-2 rounded-lg font-semibold hover:bg-cyan-700">{editingItem ? 'Update' : 'Simpan'}</button>
+                    {editingItem && <button type="button" onClick={() => setEditingItem(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
+                </div>
+            </form>
             <div>
-                <label className="block text-sm font-medium">Tanggal Pemasukan Terakhir</label>
-                <input type="date" value={lastDate} onChange={e => setLastDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required />
+                <h4 className="font-semibold text-gray-700 mb-2">Daftar {title}</h4>
+                <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
+                    {data.sort((a,b) => new Date(b.month_date).getTime() - new Date(a.month_date).getTime()).map(item => (
+                        <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
+                            <div>
+                                <p className="font-semibold text-gray-800">{new Date(item.month_date).toLocaleString('id-ID', { month: 'long', year: 'numeric' })}</p>
+                                <p className="text-sm text-green-600 font-bold">{formatCurrency(item.amount)}</p>
+                                {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <button onClick={() => setEditingItem(item)} className="p-1 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4"/></button>
+                                <button onClick={() => onDelete(item.id)} className="p-1 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4"/></button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
-            <div>
-                <label className="block text-sm font-medium">Nominal Pemasukan (Rp)</label>
-                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required placeholder="0" />
-            </div>
-            <div className="flex space-x-2">
-                <button type="submit" className="w-full bg-cyan-600 text-white py-2 rounded-lg font-semibold hover:bg-cyan-700">Simpan</button>
-                {data && <button type="button" onClick={() => onSave(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Hapus Data</button>}
-            </div>
-        </form>
+        </div>
     );
 };
 
-const LegacyExpenseForm: React.FC<{ data: LegacyExpense | null; onSave: (data: LegacyExpense | null) => void; }> = ({ data, onSave }) => {
-    const [amount, setAmount] = useState(data?.amount.toString() || '');
-    const [lastDate, setLastDate] = useState(data?.lastDate || '');
-    
-     useEffect(() => {
-        setAmount(data?.amount.toString() || '');
-        setLastDate(data?.lastDate || '');
-    }, [data]);
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        onSave({ amount: Number(amount), lastDate });
-    };
-
-    return (
-        <form onSubmit={handleSubmit} className="space-y-4 p-4 border rounded-lg bg-gray-50">
-            <h4 className="font-semibold text-gray-700">Total Pengeluaran Data Lama</h4>
-            <div>
-                <label className="block text-sm font-medium">Tanggal Pengeluaran Terakhir</label>
-                <input type="date" value={lastDate} onChange={e => setLastDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required />
-            </div>
-            <div>
-                <label className="block text-sm font-medium">Nominal Pengeluaran (Rp)</label>
-                <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required placeholder="0"/>
-            </div>
-            <div className="flex space-x-2">
-                <button type="submit" className="w-full bg-red-600 text-white py-2 rounded-lg font-semibold hover:bg-red-700">Simpan</button>
-                 {data && <button type="button" onClick={() => onSave(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Hapus Data</button>}
-            </div>
-        </form>
-    );
-};
 
 const LegacyReceivableForm: React.FC<{
     customers: CustomerData[];
     legacyReceivables: LegacyReceivable[];
     onSave: (data: Omit<LegacyReceivable, 'id'>) => void;
-    onEdit: (item: LegacyReceivable) => void;
+    onUpdate: (item: LegacyReceivable) => void;
     onDelete: (id: number) => void;
-    onSettle: (item: LegacyReceivable) => void;
-}> = ({ customers, legacyReceivables, onSave, onEdit, onDelete, onSettle }) => {
-    const [customer, setCustomer] = useState(customers.length > 0 ? customers[0].name : '');
-    const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
-    const [amount, setAmount] = useState('');
+}> = ({ customers, legacyReceivables, onSave, onUpdate, onDelete }) => {
+    const [editingItem, setEditingItem] = useState<LegacyReceivable | null>(null);
+
+    const initialFormState = {
+        nota_id: '',
+        customer: customers.length > 0 ? customers[0].name : '',
+        order_date: new Date().toISOString().substring(0, 10),
+        description: '',
+        length: '',
+        width: '',
+        qty: '1',
+        amount: '',
+    };
+    
+    const [formState, setFormState] = useState(initialFormState);
+
+    useEffect(() => {
+        if (editingItem) {
+            setFormState({
+                nota_id: editingItem.nota_id,
+                customer: editingItem.customer,
+                order_date: editingItem.order_date,
+                description: editingItem.description,
+                length: editingItem.length?.toString() || '',
+                width: editingItem.width?.toString() || '',
+                qty: editingItem.qty.toString(),
+                amount: editingItem.amount.toString(),
+            });
+        } else {
+            setFormState(initialFormState);
+        }
+    }, [editingItem, customers]);
+    
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        const { name, value } = e.target;
+        setFormState(prev => ({ ...prev, [name]: value }));
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({ customer, date, amount: Number(amount) });
-        setCustomer(customers.length > 0 ? customers[0].name : '');
-        setDate(new Date().toISOString().substring(0, 10));
-        setAmount('');
+        const dataToSubmit = {
+            nota_id: formState.nota_id,
+            customer: formState.customer,
+            order_date: formState.order_date,
+            description: formState.description,
+            length: formState.length ? Number(formState.length) : null,
+            width: formState.width ? Number(formState.width) : null,
+            qty: Number(formState.qty),
+            amount: Number(formState.amount),
+        };
+        
+        if (editingItem) {
+            onUpdate({ ...dataToSubmit, id: editingItem.id });
+        } else {
+            onSave(dataToSubmit);
+        }
+        setEditingItem(null);
     };
-    
+
     const handleDeleteClick = (id: number) => {
-        if (window.confirm("Apakah Anda yakin ingin menghapus data piutang lama ini? Tindakan ini tidak akan mempengaruhi pemasukan.")) {
+        if (window.confirm("Apakah Anda yakin ingin menghapus data piutang lama ini?")) {
             onDelete(id);
         }
     };
     
-    const [editingItem, setEditingItem] = useState<LegacyReceivable | null>(null);
-
-    useEffect(() => {
-        if (editingItem) {
-            setCustomer(editingItem.customer);
-            setDate(editingItem.date);
-            setAmount(editingItem.amount.toString());
-        } else {
-            setAmount('');
-        }
-    }, [editingItem]);
-    
-    const handleEditSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (editingItem) {
-            onEdit({ ...editingItem, customer, date, amount: Number(amount) });
-            setEditingItem(null);
-        }
-    };
-
-    const handleSettle = (item: LegacyReceivable) => {
-        if (window.confirm(`Anda akan melunasi piutang ${item.customer} sejumlah ${formatCurrency(item.amount)}? Ini akan tercatat sebagai pengeluaran baru.`)) {
-            onSettle(item);
-        }
-    };
-
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div>
-                 <form onSubmit={editingItem ? handleEditSubmit : handleSubmit} className="space-y-4 p-4 border rounded-lg bg-gray-50">
+                 <form onSubmit={handleSubmit} className="space-y-4 p-4 border rounded-lg bg-gray-50">
                     <h4 className="font-semibold text-gray-700">{editingItem ? 'Edit Piutang Lama' : 'Tambah Piutang Pelanggan Lama'}</h4>
-                     <div>
-                        <label className="block text-sm font-medium">Pelanggan</label>
-                        <select value={customer} onChange={e => setCustomer(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md" required>
-                            {customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                        </select>
+                    <input name="nota_id" value={formState.nota_id} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="No. Nota Lama" required />
+                    <select name="customer" value={formState.customer} onChange={handleInputChange} className="w-full p-2 border bg-white rounded-md" required>
+                        {customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    </select>
+                    <input name="order_date" type="date" value={formState.order_date} onChange={handleInputChange} className="w-full p-2 border rounded-md" required />
+                    <textarea name="description" value={formState.description} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="Deskripsi order..." required rows={2}></textarea>
+                    <div className="grid grid-cols-2 gap-2">
+                        <input name="length" type="number" value={formState.length} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="Panjang (m)" step="0.01" />
+                        <input name="width" type="number" value={formState.width} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="Lebar (m)" step="0.01" />
                     </div>
-                     <div>
-                        <label className="block text-sm font-medium">Tanggal</label>
-                        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium">Nominal Piutang (Rp)</label>
-                        <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="mt-1 w-full p-2 border rounded-md" required placeholder="0"/>
-                    </div>
+                     <input name="qty" type="number" value={formState.qty} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="Qty" required min="1" />
+                    <input name="amount" type="number" value={formState.amount} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="Nominal Piutang (Rp)" required />
                     <div className="flex space-x-2">
                         <button type="submit" className="w-full bg-amber-500 text-white py-2 rounded-lg font-semibold hover:bg-amber-600">{editingItem ? 'Update' : 'Simpan'}</button>
                         {editingItem && <button type="button" onClick={() => setEditingItem(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
@@ -191,17 +222,16 @@ const LegacyReceivableForm: React.FC<{
                 </form>
             </div>
             <div>
-                <h4 className="font-semibold text-gray-700 mb-2">Daftar Piutang Lama</h4>
-                <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
+                <h4 className="font-semibold text-gray-700 mb-2">Daftar Piutang Lama (Belum Lunas)</h4>
+                <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
                     {legacyReceivables.map(item => (
                         <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
                             <div>
-                                <p className="font-semibold text-gray-800">{item.customer}</p>
+                                <p className="font-semibold text-gray-800">{item.customer} <span className="text-xs text-gray-500 font-normal">({item.nota_id})</span></p>
                                 <p className="text-sm text-red-600 font-bold">{formatCurrency(item.amount)}</p>
-                                <p className="text-xs text-gray-500">{new Date(item.date).toLocaleDateString('id-ID')}</p>
+                                <p className="text-xs text-gray-500">{new Date(item.order_date).toLocaleDateString('id-ID')}</p>
                             </div>
                             <div className="flex items-center space-x-2">
-                                <button onClick={() => handleSettle(item)} className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-md hover:bg-green-200">Lunasi</button>
                                 <button onClick={() => setEditingItem(item)} className="p-1 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4"/></button>
                                 <button onClick={() => handleDeleteClick(item.id)} className="p-1 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4"/></button>
                             </div>
@@ -213,12 +243,103 @@ const LegacyReceivableForm: React.FC<{
     )
 };
 
+const AssetsAndDebts: React.FC<{
+    assets: AssetItem[];
+    debts: DebtItem[];
+    onAddAsset: (data: Omit<AssetItem, 'id'>) => void;
+    onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
+}> = ({ assets, debts, onAddAsset, onAddDebt }) => {
+    const [assetName, setAssetName] = useState('');
+    const [assetValue, setAssetValue] = useState('');
+    const [debtName, setDebtName] = useState('');
+    const [debtValue, setDebtValue] = useState('');
+
+    const handleAddAssetSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onAddAsset({ name: assetName, value: Number(assetValue) });
+        setAssetName('');
+        setAssetValue('');
+    };
+
+    const handleAddDebtSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onAddDebt({ name: debtName, value: Number(debtValue) });
+        setDebtName('');
+        setDebtValue('');
+    };
+
+    const totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
+    const totalDebts = debts.reduce((sum, d) => sum + d.value, 0);
+    const netWorth = totalAssets - totalDebts;
+
+    return (
+        <div className="space-y-8">
+            <div className="bg-gray-50 p-6 rounded-lg border text-center">
+                <h3 className="text-lg font-semibold text-gray-600">Total Kekayaan Bersih (Aset - Hutang)</h3>
+                <p className={`text-3xl font-bold mt-2 ${netWorth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(netWorth)}
+                </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Assets Column */}
+                <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-gray-800">Aset</h3>
+                    <form onSubmit={handleAddAssetSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
+                        <h4 className="font-semibold text-gray-700">Tambah Aset Baru</h4>
+                        <input value={assetName} onChange={e => setAssetName(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nama Aset (e.g., Mesin Cetak)" required />
+                        <input type="number" value={assetValue} onChange={e => setAssetValue(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nilai Aset (Rp)" required />
+                        <button type="submit" className="w-full bg-cyan-600 text-white py-2 rounded-lg font-semibold hover:bg-cyan-700">Tambah Aset</button>
+                    </form>
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-2 border rounded-lg p-2">
+                        {assets.map(item => (
+                            <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
+                                <p className="font-semibold text-gray-800">{item.name}</p>
+                                <p className="text-sm text-green-600 font-bold">{formatCurrency(item.value)}</p>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex justify-between font-bold text-lg p-3 bg-green-50 rounded-lg">
+                        <span>Total Aset</span>
+                        <span>{formatCurrency(totalAssets)}</span>
+                    </div>
+                </div>
+
+                {/* Debts Column */}
+                <div className="space-y-4">
+                    <h3 className="text-xl font-bold text-gray-800">Hutang</h3>
+                     <form onSubmit={handleAddDebtSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
+                        <h4 className="font-semibold text-gray-700">Tambah Hutang Baru</h4>
+                        <input value={debtName} onChange={e => setDebtName(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nama Hutang (e.g., Cicilan Bank)" required />
+                        <input type="number" value={debtValue} onChange={e => setDebtValue(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nilai Hutang (Rp)" required />
+                        <button type="submit" className="w-full bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">Tambah Hutang</button>
+                    </form>
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-2 border rounded-lg p-2">
+                        {debts.map(item => (
+                            <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
+                                <p className="font-semibold text-gray-800">{item.name}</p>
+                                <p className="text-sm text-red-600 font-bold">{formatCurrency(item.value)}</p>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex justify-between font-bold text-lg p-3 bg-red-50 rounded-lg">
+                        <span>Total Hutang</span>
+                        <span>{formatCurrency(totalDebts)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const Reports: React.FC<ReportsProps> = (props) => {
     const { 
     allOrders, expenses, receivables, products, customers, inventory, categories, finishings,
-    menuPermissions, legacyIncome, legacyExpense, legacyReceivables, assets, debts, notificationSettings,
-    onSetLegacyIncome, onSetLegacyExpense, onAddLegacyReceivable, onUpdateLegacyReceivable,
-    onDeleteLegacyReceivable, onSettleLegacyReceivable, onAddAsset, onAddDebt
+    menuPermissions, legacyMonthlyIncomes, legacyMonthlyExpenses, legacyReceivables, assets, debts, notificationSettings,
+    onAddLegacyMonthlyIncome, onUpdateLegacyMonthlyIncome, onDeleteLegacyMonthlyIncome,
+    onAddLegacyMonthlyExpense, onUpdateLegacyMonthlyExpense, onDeleteLegacyMonthlyExpense,
+    onAddLegacyReceivable, onUpdateLegacyReceivable, onDeleteLegacyReceivable,
+    onAddAsset, onAddDebt
     } = props;
     const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`reports/${tab.key}`)), [menuPermissions]);
     const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
@@ -285,86 +406,88 @@ const Reports: React.FC<ReportsProps> = (props) => {
         const lastDay = new Date(year, month, 0).toISOString().slice(0, 10);
         return { pnlStartDate: firstDay, pnlEndDate: lastDay };
     }, [pnlFilterType, pnlSelectedMonth, pnlSelectedYear]);
-
-    const pnlFilteredOrders = useMemo(() => allOrders.filter(o => o.orderDate >= pnlStartDate && o.orderDate <= pnlEndDate), [allOrders, pnlStartDate, pnlEndDate]);
+    
+    const pnlFilteredReceivables = useMemo(() => receivables.filter(r => r.payments && r.payments.some(p => p.date >= pnlStartDate && p.date <= pnlEndDate)), [receivables, pnlStartDate, pnlEndDate]);
     const pnlFilteredExpenses = useMemo(() => expenses.filter(e => e.date >= pnlStartDate && e.date <= pnlEndDate), [expenses, pnlStartDate, pnlEndDate]);
+    const pnlFilteredLegacyIncomes = useMemo(() => legacyMonthlyIncomes.filter(i => i.month_date >= pnlStartDate && i.month_date <= pnlEndDate), [legacyMonthlyIncomes, pnlStartDate, pnlEndDate]);
+    const pnlFilteredLegacyExpenses = useMemo(() => legacyMonthlyExpenses.filter(e => e.month_date >= pnlStartDate && e.month_date <= pnlEndDate), [legacyMonthlyExpenses, pnlStartDate, pnlEndDate]);
 
     const pnlSummary = useMemo(() => {
-        const totalSales = pnlFilteredOrders.reduce((sum, order) => sum + order.totalPrice, 0);
+        const newSystemIncome = pnlFilteredReceivables.reduce((sum, r) => {
+            const paymentsInPeriod = r.payments?.filter(p => p.date >= pnlStartDate && p.date <= pnlEndDate) || [];
+            return sum + paymentsInPeriod.reduce((pSum, p) => pSum + p.amount, 0);
+        }, 0);
+        const totalLegacyIncome = pnlFilteredLegacyIncomes.reduce((sum, item) => sum + item.amount, 0);
+        const totalIncome = newSystemIncome + totalLegacyIncome;
+        
         const totalExpenses = pnlFilteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-        return { totalSales, totalExpenses, profit: totalSales - totalExpenses };
-    }, [pnlFilteredOrders, pnlFilteredExpenses]);
+        const totalLegacyExpense = pnlFilteredLegacyExpenses.reduce((sum, item) => sum + item.amount, 0);
+        const totalExpense = totalExpenses + totalLegacyExpense;
+        
+        return { totalSales: totalIncome, totalExpenses: totalExpense, profit: totalIncome - totalExpense };
+    }, [pnlFilteredReceivables, pnlFilteredExpenses, pnlFilteredLegacyIncomes, pnlFilteredLegacyExpenses, pnlStartDate, pnlEndDate]);
 
      const pnlIncomeTableData = useMemo(() => {
         const incomeByCategory = new Map<string, number>();
         const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = { 'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate' };
         
-        pnlFilteredOrders.forEach(order => {
-            const customerData = customers.find(c => c.name === order.customer);
-            const customerLevel = customerData ? customerData.level : 'End Customer';
-            const priceKey = priceLevelMap[customerLevel];
-            let unroundedTotal = 0;
-
-            const itemPrices = order.orderItems.map(item => {
-                if (!item.productId) return { category: 'Lain-lain', price: 0 };
-                const productInfo = products.find(p => p.id === item.productId);
-                if (!productInfo) return { category: 'Lain-lain', price: 0 };
-                const finishingInfo = finishings.find(f => f.name === item.finishing);
-                const categoryInfo = categories.find(c => c.name === productInfo.category);
-                const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-                let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-                const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-                let priceMultiplier = isAreaBased ? (parseFloat(item.length) || 0) * (parseFloat(item.width) || 0) : 1;
-                const itemTotal = (materialPrice * priceMultiplier + finishingPrice) * item.qty;
-                unroundedTotal += itemTotal;
-                return { category: productInfo.category, price: itemTotal };
-            });
-
-            const roundingDifference = order.totalPrice - unroundedTotal;
-            itemPrices.forEach(itemPrice => {
-                let finalPrice = itemPrice.price;
-                if (unroundedTotal > 0) finalPrice += (itemPrice.price / unroundedTotal) * roundingDifference;
-                incomeByCategory.set(itemPrice.category, (incomeByCategory.get(itemPrice.category) || 0) + finalPrice);
-            });
-        });
+        // This calculation is complex and needs to allocate payments to categories, which is not directly possible.
+        // For simplicity, we'll sum up all payments as "Penjualan Sistem Baru".
+        const totalNewSystemIncome = pnlFilteredReceivables.reduce((sum, r) => {
+             const paymentsInPeriod = r.payments?.filter(p => p.date >= pnlStartDate && p.date <= pnlEndDate) || [];
+             return sum + paymentsInPeriod.reduce((pSum, p) => pSum + p.amount, 0);
+        }, 0);
+        if (totalNewSystemIncome > 0) {
+            incomeByCategory.set('Penjualan (Sistem Baru)', totalNewSystemIncome);
+        }
         
-        categories.forEach(cat => { if (!incomeByCategory.has(cat.name)) incomeByCategory.set(cat.name, 0); });
+        if(pnlFilteredLegacyIncomes.length > 0){
+            const legacySum = pnlFilteredLegacyIncomes.reduce((sum, item) => sum + item.amount, 0);
+            incomeByCategory.set('Pemasukan Data Lama', legacySum);
+        }
+        
         return Array.from(incomeByCategory.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
-    }, [pnlFilteredOrders, products, categories, customers, finishings]);
+    }, [pnlFilteredReceivables, pnlFilteredLegacyIncomes, pnlStartDate, pnlEndDate]);
 
     const pnlExpenseTableData = useMemo(() => {
         const data = new Map<string, number>();
         pnlFilteredExpenses.forEach(exp => { data.set(exp.category, (data.get(exp.category) || 0) + exp.amount); });
+         if(pnlFilteredLegacyExpenses.length > 0){
+            const legacySum = pnlFilteredLegacyExpenses.reduce((sum, item) => sum + item.amount, 0);
+            data.set('Pengeluaran Data Lama', legacySum);
+        }
         return Array.from(data.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
-    }, [pnlFilteredExpenses]);
+    }, [pnlFilteredExpenses, pnlFilteredLegacyExpenses]);
 
-    const pnlSalesChartData = useMemo(() => {
+    const pnlChartData = useMemo(() => {
         if (pnlFilterType === 'month') {
             const daysInMonth = new Date(parseInt(pnlSelectedMonth.slice(0, 4)), parseInt(pnlSelectedMonth.slice(5, 7)), 0).getDate();
-            const dailyData = Array.from({ length: daysInMonth }, (_, i) => ({ name: `${i + 1}`, Penjualan: 0 }));
-            pnlFilteredOrders.forEach(order => {
-                const day = new Date(order.orderDate).getUTCDate() - 1;
-                if (dailyData[day]) dailyData[day].Penjualan += order.totalPrice;
-            });
+            const dailyData = Array.from({ length: daysInMonth }, (_, i) => ({ name: `${i + 1}`, Pendapatan: 0, Pengeluaran: 0 }));
+            
+            // Pendapatan
+            pnlFilteredReceivables.forEach(r => r.payments?.forEach(p => { if (p.date >= pnlStartDate && p.date <= pnlEndDate) { const day = new Date(p.date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pendapatan += p.amount; }}));
+            pnlFilteredLegacyIncomes.forEach(i => { const day = new Date(i.month_date).getUTCDate() -1; if(dailyData[day]) dailyData[day].Pendapatan += i.amount; });
+            
+            // Pengeluaran
+            pnlFilteredExpenses.forEach(e => { const day = new Date(e.date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pengeluaran += e.amount; });
+            pnlFilteredLegacyExpenses.forEach(e => { const day = new Date(e.month_date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pengeluaran += e.amount; });
+
             return dailyData;
         } else {
-            const monthlyData = [{ name: 'Jan', Penjualan: 0 }, { name: 'Feb', Penjualan: 0 }, { name: 'Mar', Penjualan: 0 }, { name: 'Apr', Penjualan: 0 }, { name: 'Mei', Penjualan: 0 }, { name: 'Jun', Penjualan: 0 }, { name: 'Jul', Penjualan: 0 }, { name: 'Ags', Penjualan: 0 }, { name: 'Sep', Penjualan: 0 }, { name: 'Okt', Penjualan: 0 }, { name: 'Nov', Penjualan: 0 }, { name: 'Des', Penjualan: 0 }];
-            pnlFilteredOrders.forEach(order => {
-                const month = new Date(order.orderDate).getUTCMonth();
-                if (monthlyData[month]) monthlyData[month].Penjualan += order.totalPrice;
-            });
+            const monthlyData = Array.from({length: 12}, (_, i) => ({ name: new Date(0, i).toLocaleString('id-ID', {month: 'short'}), Pendapatan: 0, Pengeluaran: 0 }));
+            
+            // Pendapatan
+            pnlFilteredReceivables.forEach(r => r.payments?.forEach(p => { if (p.date >= pnlStartDate && p.date <= pnlEndDate) { const month = new Date(p.date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pendapatan += p.amount; }}));
+            pnlFilteredLegacyIncomes.forEach(i => { const month = new Date(i.month_date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pendapatan += i.amount; });
+
+            // Pengeluaran
+            pnlFilteredExpenses.forEach(e => { const month = new Date(e.date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pengeluaran += e.amount; });
+            pnlFilteredLegacyExpenses.forEach(e => { const month = new Date(e.month_date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pengeluaran += e.amount; });
+
             return monthlyData;
         }
-    }, [pnlFilterType, pnlSelectedMonth, pnlSelectedYear, pnlFilteredOrders]);
+    }, [pnlFilterType, pnlSelectedMonth, pnlSelectedYear, pnlFilteredReceivables, pnlFilteredExpenses, pnlFilteredLegacyIncomes, pnlFilteredLegacyExpenses, pnlStartDate, pnlEndDate]);
     
-    const pnlExpensePieData = useMemo(() => {
-        const expenseByCategory = pnlFilteredExpenses.reduce((acc, expense) => {
-            acc[expense.category] = (acc[expense.category] || 0) + expense.amount;
-            return acc;
-        }, {} as Record<string, number>);
-        return Object.entries(expenseByCategory).map(([name, value]) => ({ name, value })).filter(item => item.value > 0);
-    }, [pnlFilteredExpenses]);
-
     // --- END P&L LOGIC ---
 
     const handleExport = () => {
@@ -522,7 +645,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
             `;
         } else if (activeTab === 'profitAndLoss') {
             const incomeRows = pnlIncomeTableData.map(item => `<tr><td>${item.name}</td><td class="currency">${formatCurrency(item.total)}</td></tr>`).join('');
-            const expenseRows = pnlExpenseTableData.map(item => `<tr><td>${item.name}</td><td class="currency">${formatCurrency(item.total)}</td></tr>`).join('');
+            const expenseRows = pnlExpenseTableData.map(item => `<tr><td>${item.name}</td><td class="currency">(${formatCurrency(item.total)})</td></tr>`).join('');
 
             tableHtml = `
                 <div class="pnl-container">
@@ -601,12 +724,13 @@ const Reports: React.FC<ReportsProps> = (props) => {
     
     // --- FINAL RECAP CALCULATIONS ---
     const finalRecapData = useMemo(() => {
-        const totalLegacyIncome = legacyIncome?.amount || 0;
-        const totalLegacyExpense = legacyExpense?.amount || 0;
+        const totalLegacyIncome = legacyMonthlyIncomes.reduce((sum, i) => sum + i.amount, 0);
+        const totalLegacyExpense = legacyMonthlyExpenses.reduce((sum, e) => sum + e.amount, 0);
         
-        const newSystemIncome = receivables
-            .filter(r => r.paymentStatus === 'Lunas')
-            .reduce((sum, r) => sum + r.amount - (r.discount || 0), 0);
+        const newSystemIncome = receivables.reduce((sum, r) => {
+            const totalPaid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
+            return sum + totalPaid;
+        }, 0);
         
         const newSystemExpense = expenses.reduce((sum, e) => sum + e.amount, 0);
 
@@ -638,28 +762,36 @@ const Reports: React.FC<ReportsProps> = (props) => {
                 return sum + (remaining > 0 ? remaining : 0);
             }, 0);
         
-        const monthlyOrders: { [key: string]: number } = {
-            'Jan': 0, 'Feb': 0, 'Mar': 0, 'Apr': 0, 'Mei': 0, 'Jun': 0, 
-            'Jul': 0, 'Ags': 0, 'Sep': 0, 'Okt': 0, 'Nov': 0, 'Des': 0
-        };
-        const monthNames = Object.keys(monthlyOrders);
-        
-        ordersThisYear.forEach(order => {
-            const monthName = monthNames[new Date(order.orderDate).getMonth()];
-            if (monthName) {
-                monthlyOrders[monthName]++;
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+        const monthlyIncomeData = monthNames.map(name => ({ name, 'Total Pemasukan': 0 }));
+
+        // Sum payments from new system
+        receivables.forEach(r => {
+            r.payments?.forEach(p => {
+                const paymentDate = new Date(p.date);
+                if (paymentDate.getFullYear() === selectedYear) {
+                    const monthIndex = paymentDate.getMonth();
+                    monthlyIncomeData[monthIndex]['Total Pemasukan'] += p.amount;
+                }
+            });
+        });
+
+        // Sum legacy income
+        legacyMonthlyIncomes.forEach(i => {
+            const incomeDate = new Date(i.month_date);
+             if (incomeDate.getFullYear() === selectedYear) {
+                const monthIndex = incomeDate.getMonth();
+                monthlyIncomeData[monthIndex]['Total Pemasukan'] += i.amount;
             }
         });
-        
-        const chartData = Object.entries(monthlyOrders).map(([name, orders]) => ({ name, 'Total Order': orders }));
 
         return {
             totalIncome, totalExpense, finalBalance, totalPiutang,
             expensesThisYear, ordersThisYear: ordersThisYear.length,
             receivablesThisYearAmount, totalSalesThisYear,
-            chartData
+            chartData: monthlyIncomeData
         };
-    }, [receivables, expenses, allOrders, legacyIncome, legacyExpense, legacyReceivables, selectedYear]);
+    }, [receivables, expenses, allOrders, legacyMonthlyIncomes, legacyMonthlyExpenses, legacyReceivables, selectedYear]);
 
 
     // --- FILTERED DATA FOR OTHER TABS ---
@@ -963,22 +1095,82 @@ const Reports: React.FC<ReportsProps> = (props) => {
                     </div>
                 </div>
                 <div className="lg:col-span-3 h-96">
-                     <h4 className="font-bold text-lg mb-2">{`Grafik Order Bulanan (${selectedYear})`}</h4>
+                     <h4 className="font-bold text-lg mb-2">{`Grafik Pemasukan Bulanan (${selectedYear})`}</h4>
                      <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={finalRecapData.chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
                             <defs>
                                 <linearGradient id="recapGradient" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#ec4899" stopOpacity={0.8}/>
-                                    <stop offset="95%" stopColor="#ec4899" stopOpacity={0}/>
+                                    <stop offset="5%" stopColor="#82ca9d" stopOpacity={0.8}/>
+                                    <stop offset="95%" stopColor="#82ca9d" stopOpacity={0}/>
                                 </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
                             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                            <YAxis tick={{ fontSize: 12 }} />
-                            <Tooltip contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderRadius: '0.5rem' }} />
-                            <Area type="monotone" dataKey="Total Order" stroke="#ec4899" strokeWidth={2} fillOpacity={1} fill="url(#recapGradient)" />
+                            <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `Rp ${Number(value)/1000000} Jt`}/>
+                            <Tooltip contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.8)', borderRadius: '0.5rem' }} formatter={(value: number) => formatCurrency(value)}/>
+                            <Area type="monotone" dataKey="Total Pemasukan" stroke="#82ca9d" strokeWidth={2} fillOpacity={1} fill="url(#recapGradient)" />
                         </AreaChart>
                     </ResponsiveContainer>
+                </div>
+            </div>
+        </div>
+    );
+    
+    const renderProfitAndLoss = () => (
+        <div className="space-y-8">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center space-x-2">
+                    <select value={pnlFilterType} onChange={e => setPnlFilterType(e.target.value as 'month' | 'year')} className="p-2 border rounded-md bg-white text-sm">
+                        <option value="month">Per Bulan</option>
+                        <option value="year">Per Tahun</option>
+                    </select>
+                    {pnlFilterType === 'month' ? (
+                        <input type="month" value={pnlSelectedMonth} onChange={e => setPnlSelectedMonth(e.target.value)} className="p-2 border rounded-md bg-white text-sm" />
+                    ) : (
+                        <select value={pnlSelectedYear} onChange={e => setPnlSelectedYear(Number(e.target.value))} className="p-2 border rounded-md bg-white text-sm">
+                            {years.map(year => <option key={year} value={year}>{year}</option>)}
+                        </select>
+                    )}
+                </div>
+                <ProminentStatCard 
+                    icon={<ChartBarIcon />} 
+                    title="Laba / Rugi" 
+                    value={formatCurrency(pnlSummary.profit)} 
+                    gradient={pnlSummary.profit >= 0 ? "bg-gradient-to-br from-green-500 to-emerald-500" : "bg-gradient-to-br from-rose-500 to-red-500"}
+                />
+            </div>
+             <div className="h-96">
+                <h4 className="font-bold text-lg mb-2">Grafik Laba Rugi</h4>
+                <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={pnlChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                        <defs>
+                            <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22c55e" stopOpacity={0.8}/><stop offset="95%" stopColor="#22c55e" stopOpacity={0}/></linearGradient>
+                            <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/><stop offset="95%" stopColor="#ef4444" stopOpacity={0}/></linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `Rp ${Number(value)/1000000} Jt`}/>
+                        <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                        <Legend />
+                        <Area type="monotone" dataKey="Pendapatan" stroke="#22c55e" strokeWidth={2} fill="url(#incomeGradient)" />
+                        <Area type="monotone" dataKey="Pengeluaran" stroke="#ef4444" strokeWidth={2} fill="url(#expenseGradient)" />
+                    </AreaChart>
+                </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                    <h4 className="font-bold text-lg mb-2 text-green-700">Rincian Pendapatan</h4>
+                    <div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-2 text-left">Kategori</th><th className="p-2 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlIncomeTableData.map(item => (<tr key={item.name}>
+                        <td className="p-2">{item.name}</td>
+                        <td className="p-2 text-right font-semibold">{formatCurrency(item.total)}</td>
+                    </tr>))}</tbody><tfoot className="bg-gray-100 font-bold"><tr><td className="p-2">Total Pendapatan</td><td className="p-2 text-right">{formatCurrency(pnlSummary.totalSales)}</td></tr></tfoot></table></div>
+                </div>
+                 <div>
+                    <h4 className="font-bold text-lg mb-2 text-red-700">Rincian Pengeluaran</h4>
+                    <div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-2 text-left">Kategori</th><th className="p-2 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlExpenseTableData.map(item => (<tr key={item.name}>
+                        <td className="p-2">{item.name}</td>
+                        <td className="p-2 text-right font-semibold">{formatCurrency(item.total)}</td>
+                    </tr>))}</tbody><tfoot className="bg-gray-100 font-bold"><tr><td className="p-2">Total Pengeluaran</td><td className="p-2 text-right">{formatCurrency(pnlSummary.totalExpenses)}</td></tr></tfoot></table></div>
                 </div>
             </div>
         </div>
@@ -1164,78 +1356,37 @@ const Reports: React.FC<ReportsProps> = (props) => {
         );
     };
     
-    const renderLegacyData = () => (
+    const renderDataPenjualanLama = () => (
         <div className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <LegacyIncomeForm data={legacyIncome} onSave={onSetLegacyIncome} />
-                <LegacyExpenseForm data={legacyExpense} onSave={onSetLegacyExpense} />
-            </div>
-            <div className="mt-8 border-t pt-6">
-                <LegacyReceivableForm customers={customers} legacyReceivables={legacyReceivables} onSave={onAddLegacyReceivable} onEdit={onUpdateLegacyReceivable} onDelete={onDeleteLegacyReceivable} onSettle={onSettleLegacyReceivable} />
+                <MonthlyLegacyDataForm
+                    title="Pemasukan Bulanan Lama"
+                    data={legacyMonthlyIncomes}
+                    onSave={onAddLegacyMonthlyIncome}
+                    onUpdate={onUpdateLegacyMonthlyIncome}
+                    onDelete={onDeleteLegacyMonthlyIncome}
+                />
+                <MonthlyLegacyDataForm
+                    title="Pengeluaran Bulanan Lama"
+                    data={legacyMonthlyExpenses}
+                    onSave={onAddLegacyMonthlyExpense}
+                    onUpdate={onUpdateLegacyMonthlyExpense}
+                    onDelete={onDeleteLegacyMonthlyExpense}
+                />
             </div>
         </div>
     );
 
-    const renderAssetsDebts = () => {
-        const totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
-        const totalDebts = debts.reduce((sum, d) => sum + d.value, 0);
-        
-        const AssetDebtForm: React.FC<{ type: 'asset' | 'debt' }> = ({ type }) => {
-            const [name, setName] = useState('');
-            const [value, setValue] = useState('');
-            const handleSubmit = (e: React.FormEvent) => {
-                e.preventDefault();
-                if (type === 'asset') onAddAsset({ name, value: Number(value) });
-                else onAddDebt({ name, value: Number(value) });
-                setName(''); setValue('');
-            };
-            return (
-                <form onSubmit={handleSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
-                    <h4 className="font-semibold">{type === 'asset' ? 'Tambah Aset Baru' : 'Tambah Hutang Baru'}</h4>
-                    <input value={name} onChange={e => setName(e.target.value)} placeholder="Nama Aset/Hutang" className="w-full p-2 border rounded" required />
-                    <input type="number" value={value} onChange={e => setValue(e.target.value)} placeholder="Nilai (Rp)" className="w-full p-2 border rounded" required />
-                    <button type="submit" className={`w-full text-white py-2 rounded-lg font-semibold ${type === 'asset' ? 'bg-cyan-600 hover:bg-cyan-700' : 'bg-red-600 hover:bg-red-700'}`}>Simpan</button>
-                </form>
-            );
-        };
-
-        return (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div><h3 className="font-bold text-lg mb-2">Aset</h3><AssetDebtForm type="asset" /><div className="mt-4 space-y-2">{assets.map(a => (<div key={a.id} className="flex justify-between p-2 border-b"><span>{a.name}</span><span className="font-semibold">{formatCurrency(a.value)}</span></div>))}</div><div className="flex justify-between font-bold p-2 border-t mt-2"><span>Total Aset</span><span>{formatCurrency(totalAssets)}</span></div></div>
-                <div><h3 className="font-bold text-lg mb-2">Hutang</h3><AssetDebtForm type="debt" /><div className="mt-4 space-y-2">{debts.map(d => (<div key={d.id} className="flex justify-between p-2 border-b"><span>{d.name}</span><span className="font-semibold">{formatCurrency(d.value)}</span></div>))}</div><div className="flex justify-between font-bold p-2 border-t mt-2"><span>Total Hutang</span><span>{formatCurrency(totalDebts)}</span></div></div>
-            </div>
-        );
-    };
+    const renderDataPiutangLama = () => (
+         <LegacyReceivableForm 
+            customers={customers}
+            legacyReceivables={legacyReceivables}
+            onSave={onAddLegacyReceivable}
+            onUpdate={onUpdateLegacyReceivable}
+            onDelete={onDeleteLegacyReceivable}
+        />
+    );
     
-    const renderProfitAndLoss = () => {
-        const PIE_COLORS = ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#06b6d4', '#d946ef', '#14b8a6'];
-        
-        return (
-            <div className="space-y-8">
-                <div className="flex justify-start items-center space-x-4">
-                    <div className="flex items-center space-x-2"><input type="radio" id="pnl-month" name="pnl-filter" value="month" checked={pnlFilterType === 'month'} onChange={() => setPnlFilterType('month')} /><label htmlFor="pnl-month">Bulan</label><input type="month" value={pnlSelectedMonth} onChange={e => setPnlSelectedMonth(e.target.value)} disabled={pnlFilterType !== 'month'} className="p-2 border rounded-md text-sm text-gray-600" /></div>
-                     <div className="flex items-center space-x-2"><input type="radio" id="pnl-year" name="pnl-filter" value="year" checked={pnlFilterType === 'year'} onChange={() => setPnlFilterType('year')} /><label htmlFor="pnl-year">Tahun</label><input type="number" value={pnlSelectedYear} onChange={e => setPnlSelectedYear(Number(e.target.value))} disabled={pnlFilterType !== 'year'} className="p-2 border rounded-md text-sm text-gray-600 w-28" placeholder="YYYY" /></div>
-                </div>
-    
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                     <ReportStatCard icon={<CurrencyDollarIcon />} title="Penjualan" value={formatCurrency(pnlSummary.totalSales)} gradient="bg-gradient-to-br from-green-500 to-emerald-500" />
-                     <ReportStatCard icon={<ReceiptTaxIcon />} title="Pengeluaran" value={formatCurrency(pnlSummary.totalExpenses)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
-                     <ReportStatCard icon={<ChartBarIcon />} title="Laba Rugi" value={formatCurrency(pnlSummary.profit)} gradient="bg-gradient-to-br from-amber-500 to-orange-500" />
-                </div>
-    
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2 bg-white p-4 rounded-lg border h-96"><h3 className="font-bold text-gray-700 mb-4">Grafik Penjualan</h3><ResponsiveContainer width="100%" height="90%"><AreaChart data={pnlSalesChartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}><defs><linearGradient id="salesGradientPnl" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22c55e" stopOpacity={0.8}/><stop offset="95%" stopColor="#22c55e" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => `Rp${Number(value)/1000000} Jt`}/><Tooltip formatter={(value: number) => formatCurrency(value)}/><Area type="monotone" dataKey="Penjualan" stroke="#22c55e" strokeWidth={2} fill="url(#salesGradientPnl)" /></AreaChart></ResponsiveContainer></div>
-                    <div className="bg-white p-4 rounded-lg border h-96"><h3 className="font-bold text-gray-700 mb-4">Kategori Pengeluaran</h3>{pnlExpensePieData.length > 0 ? (<ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={pnlExpensePieData} cx="50%" cy="45%" labelLine={false} outerRadius={80} fill="#8884d8" dataKey="value" nameKey="name" label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`} >{pnlExpensePieData.map((entry, index) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />))}</Pie><Tooltip formatter={(value: number) => [formatCurrency(value), '']}/></PieChart></ResponsiveContainer>) : (<div className="flex items-center justify-center h-full text-gray-500">Tidak ada data pengeluaran.</div>)}</div>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div><h3 className="font-bold text-lg mb-2">Rincian Pendapatan</h3><div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Kategori</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlIncomeTableData.map(item => (<tr key={item.name}><td className="p-3">{item.name}</td><td className="p-3 text-right font-medium">{formatCurrency(item.total)}</td></tr>))}</tbody><tfoot className="bg-gray-50 font-bold"><tr><td className="p-3">TOTAL PENDAPATAN</td><td className="p-3 text-right">{formatCurrency(pnlSummary.totalSales)}</td></tr></tfoot></table></div></div>
-                    <div><h3 className="font-bold text-lg mb-2">Rincian Pengeluaran</h3><div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Kategori</th><th className="p-3 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlExpenseTableData.map(item => (<tr key={item.name}><td className="p-3">{item.name}</td><td className="p-3 text-right font-medium">{formatCurrency(item.total)}</td></tr>))}</tbody><tfoot className="bg-gray-50 font-bold"><tr><td className="p-3">TOTAL PENGELUARAN</td><td className="p-3 text-right">{formatCurrency(pnlSummary.totalExpenses)}</td></tr></tfoot></table></div></div>
-                </div>
-            </div>
-        );
-    };
-
     const renderContent = () => {
         switch (activeTab) {
             case 'finalRecap': return renderFinalRecap();
@@ -1243,81 +1394,86 @@ const Reports: React.FC<ReportsProps> = (props) => {
             case 'sales': return renderSales();
             case 'receivables': return renderReceivables();
             case 'inventory': return renderInventory();
-            case 'assetsDebts': return renderAssetsDebts();
-            case 'dataPenjualanLama': return renderLegacyData();
-            default: return <div className="text-center py-16 text-gray-500"><p>Laporan untuk tab ini belum tersedia.</p></div>;
+            case 'assetsDebts': return <AssetsAndDebts assets={assets} debts={debts} onAddAsset={onAddAsset} onAddDebt={onAddDebt} />;
+            case 'dataPenjualanLama': return renderDataPenjualanLama();
+            case 'dataPiutangLama': return renderDataPiutangLama();
+            default:
+                return <div className="text-center py-16 text-gray-500"><p>Laporan "{TABS.find(t => t.key === activeTab)?.label}" sedang dalam pengembangan.</p></div>;
         }
     };
     
-    const isDateFilterable = ['sales', 'receivables'].includes(activeTab);
-
     return (
-        <div className="bg-white p-6 rounded-xl shadow-md">
-            <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
-                <div>
+        <div className="space-y-6">
+            <div className="bg-white p-6 rounded-xl shadow-md">
+                <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
                     <h2 className="text-xl font-bold">Laporan</h2>
-                    <p className="text-sm text-gray-500">Analisis data penjualan, piutang, dan lainnya.</p>
-                </div>
-                <div className="flex space-x-2 no-print">
-                    <button 
-                        onClick={handleExport}
-                        className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg text-sm font-semibold disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-                        disabled={!['sales', 'receivables'].includes(activeTab)}
-                    >
-                        <ArrowDownTrayIcon className="h-4 w-4" /> <span>Ekspor ke Excel</span>
-                    </button>
-                    <button 
-                        onClick={handlePrintReport}
-                        className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg text-sm font-semibold disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-                        disabled={!['sales', 'receivables', 'profitAndLoss'].includes(activeTab)}
-                    >
-                        <PrinterIcon className="h-4 w-4" /> <span>Unduh PDF</span>
-                    </button>
-                </div>
-            </div>
-
-            <div className="border-b border-gray-200">
-                <nav className="-mb-px flex space-x-6 overflow-x-auto no-print" aria-label="Tabs">
-                    {accessibleTabs.map(tab => (
-                        <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`${ activeTab === tab.key ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}>
-                            {tab.label}
-                        </button>
-                    ))}
-                </nav>
-            </div>
-            
-            {isDateFilterable && (
-                 <div className="my-4 p-3 bg-gray-50 rounded-lg no-print">
-                    <div className="flex items-center space-x-4">
-                        <label className="text-sm font-medium">Periode Laporan:</label>
-                        <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-600" />
-                        <span className="text-gray-500">-</span>
-                        <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-600" />
-                        <div className="flex-grow"></div>
-                        <button onClick={() => setIsCustomerReportFilterVisible(!isCustomerReportFilterVisible)} className="flex items-center space-x-2 text-gray-600 bg-white border hover:bg-gray-100 px-3 py-2 rounded-lg text-sm font-semibold">
-                            <FilterIcon className="h-4 w-4" /> 
-                            <span>Laporan Pelanggan</span>
-                            <ChevronDownIcon className={`h-4 w-4 transition-transform ${isCustomerReportFilterVisible ? 'rotate-180' : ''}`} />
-                        </button>
-                    </div>
-                    {isCustomerReportFilterVisible && (
-                        <div className="mt-4 pt-4 border-t grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="p-2 border rounded-md bg-white text-sm">
-                                <option value="">Semua Pelanggan</option>
-                                {uniqueCustomers.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                            <div className="md:col-span-2 flex justify-end">
-                                 <button onClick={() => handlePrintCustomerSpecificReport(activeTab as 'sales' | 'receivables')} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:bg-blue-300" disabled={!filterCustomer}>
-                                    Buat Laporan Pelanggan
+                    <div className="flex items-center space-x-2">
+                        {['sales', 'receivables', 'inventory', 'profitAndLoss'].includes(activeTab) && (
+                            <div className="flex space-x-2">
+                                <button 
+                                    onClick={handlePrintReport} 
+                                    className="flex items-center text-sm bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+                                >
+                                    <PrinterIcon className="h-4 w-4 mr-2" />
+                                    Cetak
+                                </button>
+                                <button 
+                                    onClick={handleExport}
+                                    className="flex items-center text-sm bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors"
+                                >
+                                    <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
+                                    Ekspor
                                 </button>
                             </div>
-                        </div>
-                    )}
+                        )}
+                        {['sales', 'receivables'].includes(activeTab) && (
+                             <button 
+                                onClick={() => setIsCustomerReportFilterVisible(!isCustomerReportFilterVisible)}
+                                className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"
+                            >
+                                <FilterIcon className="h-4 w-4" />
+                                <span>Filter Laporan</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
-            )}
 
-
-            <div className="mt-6">
+                 {isCustomerReportFilterVisible && (
+                    <div className="bg-gray-50 p-4 rounded-lg mb-4 border">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="p-2 border rounded-md bg-white text-sm">
+                                <option value="">Pilih Pelanggan</option>
+                                {uniqueCustomers.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                            <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
+                            <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
+                            {filterCustomer && (
+                                <button
+                                    onClick={() => handlePrintCustomerSpecificReport(activeTab as 'sales' | 'receivables')}
+                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 w-full"
+                                >
+                                    Cetak Laporan Pelanggan
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
+                
+                <div className="border-b border-gray-200">
+                    <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
+                         {accessibleTabs.map(tab => (
+                            <button
+                                key={tab.key}
+                                onClick={() => setActiveTab(tab.key)}
+                                className={`${ activeTab === tab.key ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                            >
+                                {tab.label}
+                            </button>
+                         ))}
+                    </nav>
+                </div>
+            </div>
+            <div className="bg-white p-6 rounded-xl shadow-md">
                 {renderContent()}
             </div>
         </div>
