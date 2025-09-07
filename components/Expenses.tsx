@@ -15,7 +15,7 @@ const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style
 
 const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
   const [expenseName, setExpenseName] = useState('');
-  const [category, setCategory] = useState('Tinta & Bahan Cetak');
+  const [category, setCategory] = useState('Biaya Konsumsi Karyawan');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().substring(0, 10));
   const [searchQuery, setSearchQuery] = useState('');
@@ -79,7 +79,7 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
                 value={expenseName}
                 onChange={(e) => setExpenseName(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-pink-500 focus:border-pink-500" 
-                placeholder="e.g., Beli Tinta" 
+                placeholder="e.g., Makan Siang Karyawan" 
                 required
               />
             </div>
@@ -91,11 +91,15 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
                 onChange={(e) => setCategory(e.target.value)} 
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-pink-500 focus:border-pink-500"
               >
-                <option>Tinta & Bahan Cetak</option>
-                <option>Kertas & Media</option>
-                <option>Listrik & Air</option>
+                <option>Biaya Konsumsi Karyawan</option>
+                <option>Biaya Operasional</option>
+                <option>ATK dan Perlengkapan Kantor</option>
+                <option>Biaya Sponsor atau Iklan</option>
+                <option>Administrasi dan Umum</option>
+                <option>Bahan Cetak, Kertas, Tinta, Dll</option>
+                <option>Listrik, Internet dan PDAM</option>
                 <option>Gaji Karyawan</option>
-                <option>Perawatan Mesin</option>
+                <option>Maintenence dan Perawatan Mesin</option>
                 <option>Lain-lain</option>
               </select>
             </div>
@@ -107,7 +111,7 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense }) => {
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-pink-500 focus:border-pink-500" 
-                placeholder="e.g., 500000"
+                placeholder="e.g., 50000"
                 required
                 min="0"
               />
