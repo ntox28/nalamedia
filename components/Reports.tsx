@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
-import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon } from './Icons';
+import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon, ArrowUpTrayIcon } from './Icons';
 import { exportToExcel } from './reportUtils';
+import * as XLSX from 'xlsx';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -236,7 +237,7 @@ const LegacyReceivableForm: React.FC<{
             </div>
             <div>
                 <h4 className="font-semibold text-gray-700 mb-2">Daftar Piutang Lama (Belum Lunas)</h4>
-                <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-2">
                     {legacyReceivables.map(item => (
                         <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
                             <div>
@@ -345,6 +346,125 @@ const AssetsAndDebts: React.FC<{
     );
 };
 
+const LegacyReceivableImportExportModal: React.FC<{
+  show: boolean;
+  onClose: () => void;
+  filteredData: LegacyReceivable[];
+  onAddLegacyReceivable: (newItem: Omit<LegacyReceivable, 'id'>) => void;
+}> = ({ show, onClose, filteredData, onAddLegacyReceivable }) => {
+    
+    const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (event.target.files) {
+            setUploadedFile(event.target.files[0]);
+        }
+    };
+    
+    const handleDownloadTemplate = () => {
+        const templateData = [{
+            'Tanggal': '2023-01-15',
+            'No Nota': '12345',
+            'Pelanggan': 'Contoh Pelanggan',
+            'Deskripsi': 'Cetak Banner',
+            'Panjang (m)': 2,
+            'Lebar (m)': 1,
+            'Qty': 1,
+            'Nominal Piutang (Rp)': 50000
+        }];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Data Piutang Lama");
+        XLSX.writeFile(wb, "Template_Import_Piutang_Lama.xlsx");
+    };
+
+    const handleExportData = () => {
+        const dataToExport = filteredData.map((item, index) => ({
+            'No': index + 1,
+            'Tanggal': item.order_date,
+            'No Nota': item.nota_id,
+            'Pelanggan': item.customer,
+            'Deskripsi': item.description,
+            'Panjang (m)': item.length,
+            'Lebar (m)': item.width,
+            'Qty': item.qty,
+            'Nominal Piutang (Rp)': item.amount,
+        }));
+        const ws = XLSX.utils.json_to_sheet(dataToExport);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Data Piutang Lama");
+        XLSX.writeFile(wb, "Laporan_Piutang_Lama.xlsx");
+    };
+    
+    const handleImportData = () => {
+        if (!uploadedFile) return;
+        setIsLoading(true);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = e.target?.result;
+                const wb = XLSX.read(data, { type: 'array', cellDates: true });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const jsonData: any[] = XLSX.utils.sheet_to_json(ws);
+                let successCount = 0;
+
+                jsonData.forEach(row => {
+                    const newReceivable: Omit<LegacyReceivable, 'id'> = {
+                        order_date: row['Tanggal'] instanceof Date ? row['Tanggal'].toISOString().substring(0,10) : new Date().toISOString().substring(0,10),
+                        nota_id: String(row['No Nota'] || ''),
+                        customer: String(row['Pelanggan'] || ''),
+                        description: String(row['Deskripsi'] || ''),
+                        length: row['Panjang (m)'] ? Number(row['Panjang (m)']) : null,
+                        width: row['Lebar (m)'] ? Number(row['Lebar (m)']) : null,
+                        qty: Number(row['Qty'] || 1),
+                        amount: Number(row['Nominal Piutang (Rp)'] || 0),
+                    };
+                    if (newReceivable.nota_id && newReceivable.customer && newReceivable.amount > 0) {
+                        onAddLegacyReceivable(newReceivable);
+                        successCount++;
+                    }
+                });
+                alert(`Impor selesai. ${successCount} data berhasil ditambahkan.`);
+                onClose();
+            } catch (error) {
+                console.error("Error importing data:", error);
+                alert("Gagal mengimpor file. Pastikan format sudah benar sesuai template.");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        reader.readAsArrayBuffer(uploadedFile);
+    };
+
+    if (!show) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center border-b pb-3 mb-5">
+                    <h3 className="text-xl font-bold text-gray-800">Impor dan Ekspor Piutang Lama</h3>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+                </div>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4 p-4 border rounded-lg">
+                        <h4 className="font-bold text-lg text-gray-700">Impor dari Excel</h4>
+                        <div className="flex items-start space-x-3"><div className="flex-shrink-0 h-6 w-6 rounded-full bg-pink-600 text-white flex items-center justify-center font-bold text-sm">1</div><div><h5 className="font-semibold">Unduh Template</h5><p className="text-xs text-gray-500 mb-2">Dapatkan file Excel dengan format kolom yang benar.</p><button onClick={handleDownloadTemplate} className="flex items-center text-sm bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md hover:bg-gray-300"><ArrowDownTrayIcon className="h-4 w-4 mr-2" />Unduh Template</button></div></div>
+                        <div className="flex items-start space-x-3"><div className="flex-shrink-0 h-6 w-6 rounded-full bg-pink-600 text-white flex items-center justify-center font-bold text-sm">2</div><div><h5 className="font-semibold">Unggah File</h5><p className="text-xs text-gray-500 mb-2">Pilih file template yang sudah Anda isi.</p><input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="text-sm file:mr-4 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100" /></div></div>
+                        <div className="flex items-start space-x-3"><div className="flex-shrink-0 h-6 w-6 rounded-full bg-pink-600 text-white flex items-center justify-center font-bold text-sm">3</div><div><h5 className="font-semibold">Impor Data</h5><button onClick={handleImportData} disabled={!uploadedFile || isLoading} className="flex items-center text-sm bg-pink-600 text-white px-4 py-2 rounded-md hover:bg-pink-700 disabled:bg-pink-300"><ArrowUpTrayIcon className="h-4 w-4 mr-2" />{isLoading ? 'Memproses...' : 'Impor Data'}</button></div></div>
+                    </div>
+                    <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+                        <h4 className="font-bold text-lg text-gray-700">Ekspor ke Excel</h4>
+                        <p className="text-sm text-gray-600">Unduh data piutang lama yang saat ini ditampilkan (sesuai filter) ke dalam file Excel.</p>
+                        <button onClick={handleExportData} className="flex items-center text-sm bg-cyan-600 text-white px-4 py-2 rounded-md hover:bg-cyan-700"><ArrowDownTrayIcon className="h-4 w-4 mr-2" />Unduh Data (Excel)</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 const Reports: React.FC<ReportsProps> = (props) => {
     const { 
     allOrders, expenses, receivables, products, customers, inventory, categories, finishings,
@@ -378,6 +498,13 @@ const Reports: React.FC<ReportsProps> = (props) => {
         return Array.from(customerSet).sort();
     }, [allOrders]);
     
+    // States for legacy receivables tab
+    const [legacyFilterCustomer, setLegacyFilterCustomer] = useState('');
+    const [legacyFilterStartDate, setLegacyFilterStartDate] = useState('');
+    const [legacyFilterEndDate, setLegacyFilterEndDate] = useState('');
+    const [isLegacyFilterVisible, setIsLegacyFilterVisible] = useState(false);
+    const [isLegacyImportExportModalOpen, setIsLegacyImportExportModalOpen] = useState(false);
+
     useEffect(() => {
         if (years.length > 0 && !years.includes(selectedYear)) {
             setSelectedYear(years[0]);
@@ -1390,15 +1517,73 @@ const Reports: React.FC<ReportsProps> = (props) => {
         </div>
     );
 
-    const renderDataPiutangLama = () => (
-         <LegacyReceivableForm 
-            customers={customers}
-            legacyReceivables={legacyReceivables}
-            onSave={onAddLegacyReceivable}
-            onUpdate={onUpdateLegacyReceivable}
-            onDelete={onDeleteLegacyReceivable}
-        />
-    );
+    const renderDataPiutangLama = () => {
+        const filteredLegacyData = legacyReceivables.filter(item => {
+            if (legacyFilterCustomer && item.customer !== legacyFilterCustomer) return false;
+            if (legacyFilterStartDate && item.order_date < legacyFilterStartDate) return false;
+            if (legacyFilterEndDate && item.order_date > legacyFilterEndDate) return false;
+            return true;
+        });
+
+        const handlePrintLegacyReceivables = () => {
+            const groupedByMonth = filteredLegacyData.reduce((acc, item) => {
+                const month = item.order_date.substring(0, 7);
+                if (!acc[month]) acc[month] = [];
+                acc[month].push(item);
+                return acc;
+            }, {} as Record<string, LegacyReceivable[]>);
+
+            const sortedMonths = Object.keys(groupedByMonth).sort().reverse();
+            let tableHtml = '';
+            let itemCounter = 1;
+
+            for (const month of sortedMonths) {
+                const monthName = new Date(`${month}-02`).toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+                tableHtml += `<h3 class="month-header">${monthName}</h3>`;
+                const tableRows = groupedByMonth[month].map(item => `
+                    <tr><td>${itemCounter++}</td><td>${item.nota_id}</td><td>${item.customer}</td><td>${item.description}</td><td>${item.length || '-'}</td><td>${item.width || '-'}</td><td>${item.qty}</td><td class="currency">${formatCurrency(item.amount)}</td></tr>`
+                ).join('');
+                tableHtml += `<table><thead><tr><th>No</th><th>No Nota</th><th>Pelanggan</th><th>Deskripsi</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Qty</th><th class="currency">Nominal Piutang (Rp)</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+            }
+
+            const printContent = `<html><head><title>Laporan Piutang Lama</title><style>body{font-family:sans-serif;font-size:10pt}.page{width:190mm;margin:auto}.header h1{font-size:16pt}.header h2{font-size:12pt}hr{border:0;border-top:1px solid #ccc}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background-color:#f2f2f2}.currency{text-align:right}.month-header{margin-top:20px;font-size:12pt;font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:5px}</style></head><body><div class="page"><div class="header"><div><h2>Nala Media Digital Printing</h2></div><h1>Laporan Piutang Lama</h1></div><hr>${tableHtml}</div></body></html>`;
+            const printWindow = window.open('', '_blank');
+            if (printWindow) {
+                printWindow.document.write(printContent);
+                printWindow.document.close();
+                printWindow.focus();
+            }
+        };
+
+        return (
+            <div>
+                {isLegacyImportExportModalOpen && <LegacyReceivableImportExportModal show={isLegacyImportExportModalOpen} onClose={() => setIsLegacyImportExportModalOpen(false)} filteredData={filteredLegacyData} onAddLegacyReceivable={onAddLegacyReceivable} />}
+                <div className="flex justify-between items-center mb-4">
+                    <div className="flex items-center space-x-2">
+                        <button onClick={handlePrintLegacyReceivables} className="flex items-center text-sm bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"><PrinterIcon className="h-4 w-4 mr-2" />Cetak</button>
+                        <button onClick={() => setIsLegacyImportExportModalOpen(true)} className="flex items-center text-sm bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700"><ArrowDownTrayIcon className="h-4 w-4 mr-2" />Impor/Ekspor</button>
+                    </div>
+                    <button onClick={() => setIsLegacyFilterVisible(!isLegacyFilterVisible)} className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"><FilterIcon className="h-4 w-4" />Filter</button>
+                </div>
+                {isLegacyFilterVisible && (
+                    <div className="bg-gray-50 p-4 rounded-lg mb-4 border">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <select value={legacyFilterCustomer} onChange={e => setLegacyFilterCustomer(e.target.value)} className="p-2 border rounded-md bg-white text-sm"><option value="">Semua Pelanggan</option>{customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+                            <input type="date" value={legacyFilterStartDate} onChange={e => setLegacyFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
+                            <input type="date" value={legacyFilterEndDate} onChange={e => setLegacyFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
+                        </div>
+                    </div>
+                )}
+                <LegacyReceivableForm 
+                    customers={customers}
+                    legacyReceivables={filteredLegacyData}
+                    onSave={onAddLegacyReceivable}
+                    onUpdate={onUpdateLegacyReceivable}
+                    onDelete={onDeleteLegacyReceivable}
+                />
+            </div>
+        );
+    };
     
     const renderContent = () => {
         switch (activeTab) {
