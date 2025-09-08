@@ -135,8 +135,9 @@ const LegacyReceivableForm: React.FC<{
     onDelete: (id: number) => void;
 }> = ({ customers, legacyReceivables, onSave, onUpdate, onDelete }) => {
     const [editingItem, setEditingItem] = useState<LegacyReceivable | null>(null);
+    const isTouchedRef = useRef(false);
 
-    const initialFormState = {
+    const initialFormState = useMemo(() => ({
         nota_id: '',
         customer: customers.length > 0 ? customers[0].name : '',
         order_date: new Date().toISOString().substring(0, 10),
@@ -145,12 +146,13 @@ const LegacyReceivableForm: React.FC<{
         width: '',
         qty: '1',
         amount: '',
-    };
+    }), [customers]);
     
     const [formState, setFormState] = useState(initialFormState);
 
     useEffect(() => {
         if (editingItem) {
+            isTouchedRef.current = false; // Reset touched state when starting an edit
             setFormState({
                 nota_id: editingItem.nota_id,
                 customer: editingItem.customer,
@@ -162,11 +164,16 @@ const LegacyReceivableForm: React.FC<{
                 amount: editingItem.amount.toString(),
             });
         } else {
-            setFormState(initialFormState);
+            // Only reset the form if the user hasn't started typing in it.
+            // This prevents data loss on re-renders but allows resets after submissions/cancellations.
+            if (!isTouchedRef.current) {
+                setFormState(initialFormState);
+            }
         }
-    }, [editingItem, customers]);
+    }, [editingItem, initialFormState]);
     
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+        isTouchedRef.current = true; // Mark form as dirty on first input
         const { name, value } = e.target;
         setFormState(prev => ({ ...prev, [name]: value }));
     };
@@ -189,7 +196,13 @@ const LegacyReceivableForm: React.FC<{
         } else {
             onSave(dataToSubmit);
         }
-        setEditingItem(null);
+        isTouchedRef.current = false; // Allow form to be reset
+        setEditingItem(null); // Triggers useEffect to reset the form
+    };
+
+    const handleCancelEdit = () => {
+        isTouchedRef.current = false; // Allow form to be reset
+        setEditingItem(null); // Triggers useEffect to reset the form
     };
 
     const handleDeleteClick = (id: number) => {
@@ -217,7 +230,7 @@ const LegacyReceivableForm: React.FC<{
                     <input name="amount" type="number" value={formState.amount} onChange={handleInputChange} className="w-full p-2 border rounded-md" placeholder="Nominal Piutang (Rp)" required />
                     <div className="flex space-x-2">
                         <button type="submit" className="w-full bg-amber-500 text-white py-2 rounded-lg font-semibold hover:bg-amber-600">{editingItem ? 'Update' : 'Simpan'}</button>
-                        {editingItem && <button type="button" onClick={() => setEditingItem(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
+                        {editingItem && <button type="button" onClick={handleCancelEdit} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
                     </div>
                 </form>
             </div>
