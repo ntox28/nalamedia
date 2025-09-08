@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ArrowUpIcon, CurrencyDollarIcon, ShoppingCartIcon, UsersIcon, ReceiptTaxIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon } from './Icons';
-import { type MenuKey, type CardData, type KanbanData, type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductionStatusDisplay, type ProductData } from '../types';
+import { type MenuKey, type CardData, type KanbanData, type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductionStatusDisplay, type ProductData, type LegacyReceivable } from '../types';
 
 const TABS = [
     { key: 'penjualan', label: 'Dasbor Penjualan' },
@@ -58,9 +58,10 @@ interface DashboardProps {
     expenses: ExpenseItem[];
     receivables: ReceivableItem[];
     products: ProductData[];
+    legacyReceivables: LegacyReceivable[];
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData, menuPermissions, expenses, receivables, products }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData, menuPermissions, expenses, receivables, products, legacyReceivables }) => {
   const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`dashboard/${tab.key}`)), [menuPermissions]);
   
   const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
@@ -87,14 +88,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, allOrders, boardData,
     const transactionsToday = useMemo(() => allOrders.filter(o => o.orderDate === today).length, [allOrders, today]);
 
     const activeReceivablesAmount = useMemo(() => {
-        return receivables
+        const newSystemUnpaid = receivables
             .filter(r => r.paymentStatus === 'Belum Lunas')
             .reduce((sum, r) => {
                 const totalPaid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
                 const remaining = r.amount - (r.discount || 0) - totalPaid;
-                return sum + remaining;
+                return sum + (remaining > 0 ? remaining : 0);
             }, 0);
-    }, [receivables]);
+
+        const legacySystemUnpaid = legacyReceivables.reduce((sum, r) => sum + r.amount, 0);
+
+        return newSystemUnpaid + legacySystemUnpaid;
+    }, [receivables, legacyReceivables]);
 
     const expensesToday = useMemo(() => {
         return expenses

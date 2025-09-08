@@ -136,7 +136,6 @@ const LegacyReceivableForm: React.FC<{
     onDelete: (id: number) => void;
 }> = ({ customers, legacyReceivables, onSave, onUpdate, onDelete }) => {
     const [editingItem, setEditingItem] = useState<LegacyReceivable | null>(null);
-    const isTouchedRef = useRef(false);
 
     const initialFormState = useMemo(() => ({
         nota_id: '',
@@ -150,10 +149,24 @@ const LegacyReceivableForm: React.FC<{
     }), [customers]);
     
     const [formState, setFormState] = useState(initialFormState);
+    
+    // Pagination state for the list
+    const [currentPage, setCurrentPage] = useState(1);
+    const paginatedReceivables = useMemo(() => {
+        const startIndex = (currentPage - 1) * 10; // Use smaller page size here
+        return legacyReceivables.slice(startIndex, startIndex + 10);
+    }, [legacyReceivables, currentPage]);
+
+    useEffect(() => {
+        const totalPages = Math.ceil(legacyReceivables.length / 10);
+        if (currentPage > totalPages && totalPages > 0) {
+            setCurrentPage(1);
+        }
+    }, [legacyReceivables, currentPage]);
+
 
     useEffect(() => {
         if (editingItem) {
-            isTouchedRef.current = false; // Reset touched state when starting an edit
             setFormState({
                 nota_id: editingItem.nota_id,
                 customer: editingItem.customer,
@@ -165,16 +178,11 @@ const LegacyReceivableForm: React.FC<{
                 amount: editingItem.amount.toString(),
             });
         } else {
-            // Only reset the form if the user hasn't started typing in it.
-            // This prevents data loss on re-renders but allows resets after submissions/cancellations.
-            if (!isTouchedRef.current) {
-                setFormState(initialFormState);
-            }
+            setFormState(initialFormState);
         }
     }, [editingItem, initialFormState]);
     
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-        isTouchedRef.current = true; // Mark form as dirty on first input
         const { name, value } = e.target;
         setFormState(prev => ({ ...prev, [name]: value }));
     };
@@ -197,13 +205,11 @@ const LegacyReceivableForm: React.FC<{
         } else {
             onSave(dataToSubmit);
         }
-        isTouchedRef.current = false; // Allow form to be reset
-        setEditingItem(null); // Triggers useEffect to reset the form
+        setEditingItem(null);
     };
 
     const handleCancelEdit = () => {
-        isTouchedRef.current = false; // Allow form to be reset
-        setEditingItem(null); // Triggers useEffect to reset the form
+        setEditingItem(null);
     };
 
     const handleDeleteClick = (id: number) => {
@@ -237,8 +243,8 @@ const LegacyReceivableForm: React.FC<{
             </div>
             <div>
                 <h4 className="font-semibold text-gray-700 mb-2">Daftar Piutang Lama (Belum Lunas)</h4>
-                <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-2">
-                    {legacyReceivables.map(item => (
+                <div className="space-y-2">
+                    {paginatedReceivables.map(item => (
                         <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
                             <div>
                                 <p className="font-semibold text-gray-800">{item.customer} <span className="text-xs text-gray-500 font-normal">({item.nota_id})</span></p>
@@ -252,6 +258,12 @@ const LegacyReceivableForm: React.FC<{
                         </div>
                     ))}
                 </div>
+                 <Pagination
+                    totalItems={legacyReceivables.length}
+                    itemsPerPage={10}
+                    currentPage={currentPage}
+                    onPageChange={setCurrentPage}
+                />
             </div>
         </div>
     )
@@ -393,7 +405,7 @@ const LegacyReceivableImportExportModal: React.FC<{
         }));
         const ws = XLSX.utils.json_to_sheet(dataToExport);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Data Piutang Lama");
+        XLSX.utils.book_append_sheet(wb, ws, "Laporan_Piutang_Lama.xlsx");
         XLSX.writeFile(wb, "Laporan_Piutang_Lama.xlsx");
     };
     
@@ -552,38 +564,31 @@ const Reports: React.FC<ReportsProps> = (props) => {
     const pnlFilteredLegacyIncomes = useMemo(() => legacyMonthlyIncomes.filter(i => i.month_date >= pnlStartDate && i.month_date <= pnlEndDate), [legacyMonthlyIncomes, pnlStartDate, pnlEndDate]);
     const pnlFilteredLegacyExpenses = useMemo(() => legacyMonthlyExpenses.filter(e => e.month_date >= pnlStartDate && e.month_date <= pnlEndDate), [legacyMonthlyExpenses, pnlStartDate, pnlEndDate]);
 
-    const pnlSummary = useMemo(() => {
-        const newSystemIncome = pnlFilteredReceivables.reduce((sum, r) => {
-            const paymentsInPeriod = r.payments?.filter(p => p.date >= pnlStartDate && p.date <= pnlEndDate) || [];
-            return sum + paymentsInPeriod.reduce((pSum, p) => pSum + p.amount, 0);
-        }, 0);
-        const totalLegacyIncome = pnlFilteredLegacyIncomes.reduce((sum, item) => sum + item.amount, 0);
-        const totalIncome = newSystemIncome + totalLegacyIncome;
-        
-        const totalExpenses = pnlFilteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-        const totalLegacyExpense = pnlFilteredLegacyExpenses.reduce((sum, item) => sum + item.amount, 0);
-        const totalExpense = totalExpenses + totalLegacyExpense;
-        
-        return { totalSales: totalIncome, totalExpenses: totalExpense, profit: totalIncome - totalExpense };
-    }, [pnlFilteredReceivables, pnlFilteredExpenses, pnlFilteredLegacyIncomes, pnlFilteredLegacyExpenses, pnlStartDate, pnlEndDate]);
-
-     const pnlIncomeTableData = useMemo(() => {
+    const pnlIncomeTableData = useMemo(() => {
         const incomeByCategory = new Map<string, number>();
-        const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = { 'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate' };
-        
-        // This calculation is complex and needs to allocate payments to categories, which is not directly possible.
-        // For simplicity, we'll sum up all payments as "Penjualan Sistem Baru".
-        const totalNewSystemIncome = pnlFilteredReceivables.reduce((sum, r) => {
-             const paymentsInPeriod = r.payments?.filter(p => p.date >= pnlStartDate && p.date <= pnlEndDate) || [];
-             return sum + paymentsInPeriod.reduce((pSum, p) => pSum + p.amount, 0);
-        }, 0);
-        if (totalNewSystemIncome > 0) {
-            incomeByCategory.set('Penjualan (Sistem Baru)', totalNewSystemIncome);
+
+        const incomeFromNewSystem = { regular: 0, fromLegacy: 0 };
+        pnlFilteredReceivables.forEach(r => {
+            const paymentsInPeriod = r.payments?.filter(p => p.date >= pnlStartDate && p.date <= pnlEndDate) || [];
+            const totalPayments = paymentsInPeriod.reduce((pSum, p) => pSum + p.amount, 0);
+            // Paid legacy receivables are converted to new receivables with 'Nota-' prefix
+            if (r.id.startsWith('Nota-')) {
+                incomeFromNewSystem.fromLegacy += totalPayments;
+            } else {
+                incomeFromNewSystem.regular += totalPayments;
+            }
+        });
+
+        if (incomeFromNewSystem.regular > 0) {
+            incomeByCategory.set('Penjualan Sistem Baru (Regular)', incomeFromNewSystem.regular);
         }
-        
+        if (incomeFromNewSystem.fromLegacy > 0) {
+            incomeByCategory.set('Pembayaran Piutang Lama', incomeFromNewSystem.fromLegacy);
+        }
+
         if(pnlFilteredLegacyIncomes.length > 0){
             const legacySum = pnlFilteredLegacyIncomes.reduce((sum, item) => sum + item.amount, 0);
-            incomeByCategory.set('Pemasukan Data Lama', legacySum);
+            incomeByCategory.set('Pemasukan Data Lama (Bulanan)', legacySum);
         }
         
         return Array.from(incomeByCategory.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
@@ -598,6 +603,13 @@ const Reports: React.FC<ReportsProps> = (props) => {
         }
         return Array.from(data.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
     }, [pnlFilteredExpenses, pnlFilteredLegacyExpenses]);
+
+    const pnlSummary = useMemo(() => {
+        const totalIncome = pnlIncomeTableData.reduce((sum, item) => sum + item.total, 0);
+        const totalExpense = pnlExpenseTableData.reduce((sum, item) => sum + item.total, 0);
+        return { totalSales: totalIncome, totalExpenses: totalExpense, profit: totalIncome - totalExpense };
+    }, [pnlIncomeTableData, pnlExpenseTableData]);
+
 
     const pnlChartData = useMemo(() => {
         if (pnlFilterType === 'month') {
@@ -650,7 +662,17 @@ const Reports: React.FC<ReportsProps> = (props) => {
                 );
                 break;
             case 'receivables':
-                exportToExcel('receivables', filteredReceivablesData, dateRange);
+                 // Use a different data structure for receivables export
+                const receivablesToExport = filteredReceivablesData.map(r => ({
+                    'No Nota': r.type === 'legacy' ? r.nota_id : r.id,
+                    'Pelanggan': r.customer,
+                    'Total Tagihan': r.amount,
+                    'Sudah Dibayar': r.paid,
+                    'Sisa Tagihan': r.remaining,
+                    'Status Produksi': r.productionStatus,
+                    'Jatuh Tempo': formatDate(r.due),
+                }));
+                exportToExcel('receivables', receivablesToExport, dateRange);
                 break;
             case 'inventory':
                 // Inventory doesn't use date filter, so pass empty
@@ -668,7 +690,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
         const reportTitle = 
             activeTab === 'sales' ? 'Laporan Penjualan' : 
-            activeTab === 'receivables' ? 'Laporan Piutang' : 
+            activeTab === 'receivables' ? 'Laporan Piutang (Belum Lunas)' : 
             'Laporan Laba Rugi';
         
         const period = activeTab === 'profitAndLoss' ? 
@@ -745,12 +767,11 @@ const Reports: React.FC<ReportsProps> = (props) => {
             const tableRows = filteredReceivablesData.map((r, index) => `
                 <tr>
                     <td>${index + 1}</td>
-                    <td>${r.id}</td>
+                    <td>${r.type === 'legacy' ? r.nota_id : r.id}</td>
                     <td>${r.customer}</td>
                     <td class="currency">${formatCurrency(r.amount)}</td>
                     <td class="currency">${formatCurrency(r.paid)}</td>
                     <td class="currency">${formatCurrency(r.remaining)}</td>
-                    <td>${r.paymentStatus}</td>
                     <td>${r.productionStatus}</td>
                     <td>${formatDate(r.due)}</td>
                 </tr>
@@ -768,7 +789,6 @@ const Reports: React.FC<ReportsProps> = (props) => {
                             <th class="currency">Total Tagihan</th>
                             <th class="currency">Dibayar</th>
                             <th class="currency">Sisa</th>
-                            <th>Status Bayar</th>
                             <th>Status Produksi</th>
                             <th>Jatuh Tempo</th>
                         </tr>
@@ -1032,20 +1052,47 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
 
     const filteredReceivablesData = useMemo(() => {
-        return receivables
-            .filter(receivable => {
-                const order = allOrders.find(o => o.id === receivable.id);
-                if (!order || order.orderDate < filterStartDate || order.orderDate > filterEndDate) return false;
-                if (filterCustomer && receivable.customer !== filterCustomer) return false;
-                return true;
+        const unpaidNewSystem = receivables
+            .filter(r => {
+                const order = allOrders.find(o => o.id === r.id);
+                if (!order) return false; // Ensure order data exists
+                if (filterStartDate && order.orderDate < filterStartDate) return false;
+                if (filterEndDate && order.orderDate > filterEndDate) return false;
+                if (filterCustomer && r.customer !== filterCustomer) return false;
+                return r.paymentStatus === 'Belum Lunas';
             })
             .map(r => {
                 const paid = r.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
                 const remaining = r.amount - (r.discount || 0) - paid;
-                return { ...r, paid, remaining };
+                return { ...r, paid, remaining, type: 'new' as const };
+            });
+
+        const unpaidLegacy = legacyReceivables
+            .filter(r => {
+                if (filterStartDate && r.order_date < filterStartDate) return false;
+                if (filterEndDate && r.order_date > filterEndDate) return false;
+                if (filterCustomer && r.customer !== filterCustomer) return false;
+                return true;
             })
-            .sort((a, b) => b.id.localeCompare(a.id));
-    }, [receivables, allOrders, filterStartDate, filterEndDate, filterCustomer]);
+            .map(r => {
+                return {
+                    id: `legacy-${r.id}`,
+                    nota_id: r.nota_id,
+                    customer: r.customer,
+                    amount: r.amount,
+                    paid: 0,
+                    remaining: r.amount,
+                    paymentStatus: 'Belum Lunas' as const,
+                    productionStatus: 'Data Lama' as const,
+                    due: r.order_date,
+                    type: 'legacy' as const
+                };
+            });
+
+        return [...unpaidNewSystem, ...unpaidLegacy]
+            .filter(item => item.remaining > 0)
+            .sort((a, b) => new Date(b.due).getTime() - new Date(a.due).getTime());
+    }, [receivables, legacyReceivables, allOrders, filterStartDate, filterEndDate, filterCustomer]);
     
     const paginatedReceivables = useMemo(() => {
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -1399,15 +1446,16 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
     const renderReceivables = () => {
         const totalRemaining = filteredReceivablesData.reduce((sum, r) => sum + r.remaining, 0);
+        const totalUnpaidNotes = filteredReceivablesData.length;
 
         return (
             <div className="space-y-6">
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                      <ReportStatCard icon={<ReceiptTaxIcon />} title="Total Sisa Tagihan" value={formatCurrency(totalRemaining)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
-                     <ReportStatCard icon={<ExclamationTriangleIcon />} title="Jumlah Nota Belum Lunas" value={filteredReceivablesData.filter(r => r.paymentStatus === 'Belum Lunas').length.toString()} gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500" />
+                     <ReportStatCard icon={<ExclamationTriangleIcon />} title="Jumlah Nota Belum Lunas" value={totalUnpaidNotes.toString()} gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500" />
                  </div>
                  <div>
-                    <h4 className="font-semibold mb-2">Daftar Piutang</h4>
+                    <h4 className="font-semibold mb-2">Daftar Piutang (Belum Lunas)</h4>
                     <div className="overflow-x-auto border rounded-lg">
                         <table className="min-w-full text-sm">
                             <thead className="bg-gray-50">
@@ -1422,7 +1470,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
                             <tbody className="divide-y">
                                 {paginatedReceivables.map(r => (
                                     <tr key={r.id}>
-                                        <td className="py-2 px-3">{r.id}</td>
+                                        <td className="py-2 px-3 font-semibold">{r.type === 'legacy' ? r.nota_id : r.id}</td>
                                         <td className="py-2 px-3">{r.customer}</td>
                                         <td className="py-2 px-3 text-right font-semibold">{formatCurrency(r.remaining)}</td>
                                         <td className="py-2 px-3 text-center">
@@ -1523,7 +1571,9 @@ const Reports: React.FC<ReportsProps> = (props) => {
             if (legacyFilterStartDate && item.order_date < legacyFilterStartDate) return false;
             if (legacyFilterEndDate && item.order_date > legacyFilterEndDate) return false;
             return true;
-        });
+        }).sort((a,b) => b.nota_id.localeCompare(a.nota_id));
+
+        const totalLegacyPiutang = filteredLegacyData.reduce((sum, item) => sum + item.amount, 0);
 
         const handlePrintLegacyReceivables = () => {
             const groupedByMonth = filteredLegacyData.reduce((acc, item) => {
@@ -1546,7 +1596,9 @@ const Reports: React.FC<ReportsProps> = (props) => {
                 tableHtml += `<table><thead><tr><th>No</th><th>No Nota</th><th>Pelanggan</th><th>Deskripsi</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Qty</th><th class="currency">Nominal Piutang (Rp)</th></tr></thead><tbody>${tableRows}</tbody></table>`;
             }
 
-            const printContent = `<html><head><title>Laporan Piutang Lama</title><style>body{font-family:sans-serif;font-size:10pt}.page{width:190mm;margin:auto}.header h1{font-size:16pt}.header h2{font-size:12pt}hr{border:0;border-top:1px solid #ccc}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background-color:#f2f2f2}.currency{text-align:right}.month-header{margin-top:20px;font-size:12pt;font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:5px}</style></head><body><div class="page"><div class="header"><div><h2>Nala Media Digital Printing</h2></div><h1>Laporan Piutang Lama</h1></div><hr>${tableHtml}</div></body></html>`;
+            const summaryHtml = `<div class="summary-box"><strong>Total Piutang Lama: ${formatCurrency(totalLegacyPiutang)}</strong></div>`;
+
+            const printContent = `<html><head><title>Laporan Piutang Lama</title><style>body{font-family:sans-serif;font-size:10pt}@media print{.print-button-container{display:none}}.page{width:190mm;margin:auto}.header h1{font-size:16pt}.header h2{font-size:12pt}hr{border:0;border-top:1px solid #ccc}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background-color:#f2f2f2}.currency{text-align:right}.month-header{margin-top:20px;font-size:12pt;font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:5px}.summary-box{text-align:right;margin-top:20px;font-size:12pt}.print-button-container{position:fixed;top:20px;right:20px;text-align:center;z-index:100}.print-button-container button{background-color:#ec4899;color:white;font-weight:bold;padding:8px 24px;border-radius:8px;border:none;cursor:pointer}</style></head><body><div class="print-button-container"><button onclick="window.print()">Cetak atau Simpan PDF</button></div><div class="page"><div class="header"><div><h2>Nala Media Digital Printing</h2></div><h1>Laporan Piutang Lama</h1></div><hr>${tableHtml}${summaryHtml}</div></body></html>`;
             const printWindow = window.open('', '_blank');
             if (printWindow) {
                 printWindow.document.write(printContent);
@@ -1574,6 +1626,10 @@ const Reports: React.FC<ReportsProps> = (props) => {
                         </div>
                     </div>
                 )}
+                 <div className="bg-amber-50 p-4 rounded-lg my-4 text-center">
+                    <h4 className="font-semibold text-amber-800">Total Piutang Lama (Sesuai Filter)</h4>
+                    <p className="text-2xl font-bold text-amber-700">{formatCurrency(totalLegacyPiutang)}</p>
+                </div>
                 <LegacyReceivableForm 
                     customers={customers}
                     legacyReceivables={filteredLegacyData}
