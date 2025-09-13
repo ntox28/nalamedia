@@ -1,8 +1,6 @@
-
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { type SalaryData, type EmployeeData, type AttendanceData, type PayrollRecord, type Bonus, type Deduction } from '../types';
-import { TrashIcon, PencilIcon, PrinterIcon, FilterIcon } from './Icons';
+import { TrashIcon, PencilIcon, PrinterIcon, FilterIcon, CalendarDaysIcon, ArrowUturnLeftIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -16,11 +14,17 @@ const TABS = [
 
 // --- Helper Functions ---
 const timeToMinutes = (time: string): number => {
+    if (!time || !time.includes(':')) return 0;
     const [hours, minutes] = time.split(':').map(Number);
     return hours * 60 + minutes;
 };
 
 const formatCurrency = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
+const formatDuration = (totalMinutes: number) => {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = Math.round(totalMinutes % 60);
+    return `${hours} Jam ${minutes} Menit`;
+};
 
 // --- Modal Components ---
 const ReusableModal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; maxWidth?: string }> = ({ title, onClose, children, maxWidth = 'max-w-lg' }) => (
@@ -34,6 +38,121 @@ const ReusableModal: React.FC<{ title: string; onClose: () => void; children: Re
         </div>
     </div>
 );
+
+const AttendanceFormModal: React.FC<{
+    employee: { name: string; salaryId: number, division: string },
+    recordToEdit?: AttendanceData,
+    onSave: (data: Omit<AttendanceData, 'id'> | AttendanceData) => void,
+    onClose: () => void,
+    allAttendanceForEmployee: AttendanceData[],
+}> = ({ employee, recordToEdit, onSave, onClose, allAttendanceForEmployee }) => {
+    const [attendanceDate, setAttendanceDate] = useState(recordToEdit?.date || new Date().toISOString().substring(0, 10));
+    const [shift, setShift] = useState<'Pagi' | 'Sore'>(recordToEdit?.shift || 'Pagi');
+    const [clockIn, setClockIn] = useState(recordToEdit?.clockIn || '');
+    const [clockOut, setClockOut] = useState(recordToEdit?.clockOut || '');
+    const [isOvertime, setIsOvertime] = useState(recordToEdit?.isOvertime || false);
+    const [overtimeHours, setOvertimeHours] = useState<string>(recordToEdit?.overtimeHours?.toString() || '0');
+    const [overtimeMinutes, setOvertimeMinutes] = useState<string>(recordToEdit?.overtimeMinutes?.toString() || '0');
+    const [overtimeNotes, setOvertimeNotes] = useState(recordToEdit?.overtimeNotes || '');
+    
+    useEffect(() => {
+        if (!recordToEdit) {
+            if (shift === 'Pagi') { setClockIn('09:00'); setClockOut('17:00'); }
+            else { setClockIn('17:00'); setClockOut('01:00'); }
+        }
+    }, [shift, recordToEdit]);
+    
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        const isDuplicateDate = allAttendanceForEmployee.some(
+            att => att.date === attendanceDate && att.id !== recordToEdit?.id
+        );
+        if (isDuplicateDate) {
+            alert(`Karyawan ini sudah memiliki data absen pada tanggal ${new Date(attendanceDate).toLocaleDateString('id-ID')}.`);
+            return;
+        }
+
+        const data = {
+            salaryId: employee.salaryId,
+            date: attendanceDate,
+            shift, clockIn, clockOut, isOvertime,
+            overtimeHours: isOvertime ? Number(overtimeHours) : 0,
+            overtimeMinutes: isOvertime ? Number(overtimeMinutes) : 0,
+            overtimeNotes: isOvertime ? overtimeNotes : '',
+        };
+
+        if (recordToEdit) {
+            onSave({ ...data, id: recordToEdit.id });
+        } else {
+            onSave(data);
+        }
+    };
+
+    return (
+        <ReusableModal title={recordToEdit ? `Edit Absen ${employee.name}` : `Tambah Absen ${employee.name}`} onClose={onClose}>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-sm font-medium text-gray-700">Tanggal Absen</label><input type="date" value={attendanceDate} onChange={e => setAttendanceDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" /></div>
+                    <div><label className="block text-sm font-medium text-gray-700">Shift</label><select value={shift} onChange={e => setShift(e.target.value as 'Pagi' | 'Sore')} className="mt-1 w-full p-2 border bg-white rounded-md"><option value="Pagi">Pagi</option><option value="Sore">Sore</option></select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-sm font-medium text-gray-700">Jam Masuk</label><input type="time" value={clockIn} onChange={e => setClockIn(e.target.value)} className="mt-1 w-full p-2 border rounded-md" /></div>
+                    <div><label className="block text-sm font-medium text-gray-700">Jam Keluar</label><input type="time" value={clockOut} onChange={e => setClockOut(e.target.value)} className="mt-1 w-full p-2 border rounded-md" /></div>
+                </div>
+                <div><label className="flex items-center space-x-2"><input type="checkbox" checked={isOvertime} onChange={e => setIsOvertime(e.target.checked)} className="h-4 w-4 rounded text-pink-600 focus:ring-pink-500" /><span className="text-sm font-medium text-gray-700">Lembur</span></label></div>
+                {isOvertime && (<div className="p-4 border rounded-md bg-gray-50 space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700">Jam Lembur</label><input type="number" value={overtimeHours} onChange={e => setOvertimeHours(e.target.value)} className="mt-1 w-full p-2 border rounded-md" min="0" /></div><div><label className="block text-sm font-medium text-gray-700">Menit Lembur</label><input type="number" value={overtimeMinutes} onChange={e => setOvertimeMinutes(e.target.value)} className="mt-1 w-full p-2 border rounded-md" min="0" max="59" /></div></div><div><label className="block text-sm font-medium text-gray-700">Catatan Lembur</label><textarea value={overtimeNotes} onChange={e => setOvertimeNotes(e.target.value)} rows={2} className="mt-1 w-full p-2 border rounded-md" placeholder="e.g., Menyelesaikan pekerjaan..."></textarea></div></div>)}
+                <div className="border-t pt-4 flex justify-end"><button type="submit" className="w-full bg-pink-600 text-white py-2.5 rounded-lg font-bold hover:bg-pink-700">Simpan Absensi</button></div>
+            </form>
+        </ReusableModal>
+    );
+};
+
+const AttendanceDetailModal: React.FC<{
+    employee: { name: string; salaryId: number, division: string, employeeId: number },
+    attendanceRecords: AttendanceData[],
+    onClose: () => void,
+    onAdd: () => void,
+    onEdit: (record: AttendanceData) => void,
+    onDelete: (id: number) => void,
+}> = ({ employee, attendanceRecords, onClose, onAdd, onEdit, onDelete }) => {
+    return (
+        <ReusableModal title={`Detail Absensi: ${employee.name}`} onClose={onClose} maxWidth="max-w-3xl">
+            <div className="space-y-4">
+                <table className="min-w-full text-sm">
+                    <thead className="bg-gray-50">
+                        <tr>
+                            <th className="py-2 px-3 text-left">Tanggal</th>
+                            <th className="py-2 px-3 text-left">Shift</th>
+                            <th className="py-2 px-3 text-left">Jam Kerja</th>
+                            <th className="py-2 px-3 text-left">Lembur</th>
+                            <th className="py-2 px-3 text-left">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                        {attendanceRecords.map(att => (
+                            <tr key={att.id}>
+                                <td className="py-2 px-3">{new Date(att.date).toLocaleDateString('id-ID')}</td>
+                                <td className="py-2 px-3">{att.shift}</td>
+                                <td className="py-2 px-3">{att.clockIn} - {att.clockOut}</td>
+                                <td className="py-2 px-3">{att.isOvertime ? `${att.overtimeHours || 0}j ${att.overtimeMinutes || 0}m` : '-'}</td>
+                                <td className="py-2 px-3 space-x-2">
+                                    <button onClick={() => onEdit(att)} className="p-1 text-blue-600 hover:text-blue-800"><PencilIcon className="h-4 w-4" /></button>
+                                    <button onClick={() => onDelete(att.id)} className="p-1 text-red-600 hover:text-red-800"><TrashIcon className="h-4 w-4" /></button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {attendanceRecords.length === 0 && <p className="text-center text-gray-500 py-4">Belum ada data absensi.</p>}
+            </div>
+            <div className="border-t pt-4 mt-4 flex justify-between">
+                <button onClick={onClose} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold hover:bg-gray-300">Selesai</button>
+                <button onClick={onAdd} className="bg-cyan-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-cyan-700">Tambah Absen</button>
+            </div>
+        </ReusableModal>
+    );
+};
+
 
 const BonusDeductionModal: React.FC<{ type: 'Bonus' | 'Potongan'; onClose: () => void; onSave: (item: Bonus | Deduction) => void; initialData?: Bonus | Deduction; }> = ({ type, onClose, onSave, initialData }) => {
     const [amount, setAmount] = useState(initialData?.amount.toString() || '');
@@ -185,27 +304,22 @@ interface PayrollProps {
     payrollRecords: PayrollRecord[];
     menuPermissions: string[];
     onAddAttendance: (newAttendance: Omit<AttendanceData, 'id'>) => void;
+    onUpdateAttendance: (updatedAttendance: AttendanceData) => void;
     onDeleteAttendance: (id: number) => void;
+    onBulkDeleteAttendance: (ids: number[]) => void;
     onProcessPayroll: (employeeId: number, startDate: string, endDate: string, baseSalary: number, overtimePay: number, bonuses: Bonus[], deductions: Deduction[], processedAttendance: AttendanceData[]) => void;
     onUpdatePayroll: (updatedRecord: PayrollRecord) => void;
     onRevertPayroll: (payrollRecordId: number) => void;
+    onDeletePayrollPermanently: (record: PayrollRecord) => void;
 }
 
-const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payrollRecords, menuPermissions, onAddAttendance, onDeleteAttendance, onProcessPayroll, onUpdatePayroll, onRevertPayroll }) => {
+const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payrollRecords, menuPermissions, onAddAttendance, onUpdateAttendance, onDeleteAttendance, onBulkDeleteAttendance, onProcessPayroll, onUpdatePayroll, onRevertPayroll, onDeletePayrollPermanently }) => {
     const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`payroll/${tab.key}`)), [menuPermissions]);
     const [activeTab, setActiveTab] = useState<string>(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
 
-    // Attendance form state
-    const [salaryId, setSalaryId] = useState<string>('');
-    const [division, setDivision] = useState('');
-    const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().substring(0, 10));
-    const [shift, setShift] = useState<'Pagi' | 'Sore'>('Pagi');
-    const [clockIn, setClockIn] = useState('');
-    const [clockOut, setClockOut] = useState('');
-    const [isOvertime, setIsOvertime] = useState(false);
-    const [overtimeHours, setOvertimeHours] = useState<string>('0');
-    const [overtimeMinutes, setOvertimeMinutes] = useState<string>('0');
-    const [overtimeNotes, setOvertimeNotes] = useState('');
+    // Modals state for Attendance tab
+    const [detailModalEmployee, setDetailModalEmployee] = useState<any | null>(null);
+    const [formModalState, setFormModalState] = useState<{ isOpen: boolean; employee: any, recordToEdit?: AttendanceData }>({ isOpen: false, employee: null });
     
     // Summary tab state
     const [isFilterVisible, setIsFilterVisible] = useState(true);
@@ -234,56 +348,8 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
                 name: employee?.name || 'Karyawan Tidak Ditemukan',
                 division: employee?.division || 'N/A',
             };
-        });
+        }).sort((a,b) => a.name.localeCompare(b.name));
     }, [salaries, employees]);
-
-    useEffect(() => {
-        if (salaryId) {
-            const selected = employeesWithSalary.find(e => e.salaryId.toString() === salaryId);
-            if (selected) {
-                setDivision(selected.division);
-                if (shift === 'Pagi') {
-                    setClockIn('09:00');
-                    setClockOut('17:00');
-                } else {
-                    setClockIn('17:00');
-                    setClockOut('01:00');
-                }
-            }
-        } else {
-            setDivision('');
-            setClockIn('');
-            setClockOut('');
-        }
-    }, [salaryId, shift, employeesWithSalary]);
-
-    const resetForm = () => {
-        setSalaryId('');
-        setDivision('');
-        setAttendanceDate(new Date().toISOString().substring(0, 10));
-        setShift('Pagi');
-        setClockIn('');
-        setClockOut('');
-        setIsOvertime(false);
-        setOvertimeHours('0');
-        setOvertimeMinutes('0');
-        setOvertimeNotes('');
-    };
-
-    const handleAddAttendanceSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!salaryId) {
-            alert('Silakan pilih karyawan terlebih dahulu.');
-            return;
-        }
-        onAddAttendance({
-            salaryId: Number(salaryId), date: attendanceDate, shift, clockIn, clockOut, isOvertime,
-            overtimeHours: isOvertime ? Number(overtimeHours) : 0,
-            overtimeMinutes: isOvertime ? Number(overtimeMinutes) : 0,
-            overtimeNotes: isOvertime ? overtimeNotes : '',
-        });
-        resetForm();
-    };
 
     const availableAttendance = useMemo(() => {
         const processedAttendanceIds = new Set(
@@ -291,6 +357,40 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
         );
         return attendance.filter(att => !processedAttendanceIds.has(att.id));
     }, [attendance, payrollRecords]);
+
+    const handleSaveAttendance = (data: Omit<AttendanceData, 'id'> | AttendanceData) => {
+        if ('id' in data) {
+            onUpdateAttendance(data);
+        } else {
+            onAddAttendance(data);
+        }
+        setFormModalState({ isOpen: false, employee: null });
+        // After saving, reopen the detail modal to see the changes
+        const updatedEmployee = employeesWithSalary.find(e => e.salaryId === data.salaryId);
+        if(updatedEmployee) setDetailModalEmployee(updatedEmployee);
+    };
+
+    const handleDeleteSingleAttendance = (id: number) => {
+        if (window.confirm('Yakin ingin menghapus data absen ini?')) {
+            onDeleteAttendance(id);
+        }
+    };
+    
+    const handleResetAttendance = (employeeId: number) => {
+        if(window.confirm('Anda Yakin ingin mereset semua Absen Ini?')) {
+            const attendanceIdsToDelete = availableAttendance
+                .filter(att => {
+                    const salary = salaries.find(s => s.id === att.salaryId);
+                    return salary?.employeeId === employeeId;
+                })
+                .map(att => att.id);
+            if (attendanceIdsToDelete.length > 0) {
+                onBulkDeleteAttendance(attendanceIdsToDelete);
+            } else {
+                alert('Tidak ada data absensi untuk direset.');
+            }
+        }
+    };
 
     const handleAmbilAbsen = () => {
         if (!filterEmployeeId || !filterStartDate || !filterEndDate) {
@@ -378,213 +478,28 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
     const handlePrintPayslip = (record: PayrollRecord) => {
         const employee = employees.find(e => e.id === record.employeeId);
         if (!employee) return;
-
-        // --- Duration Calculations ---
         let totalWorkMinutes = 0;
         record.processedAttendance.forEach(att => {
             const clockInMinutes = timeToMinutes(att.clockIn);
             let clockOutMinutes = timeToMinutes(att.clockOut);
-            if (clockOutMinutes < clockInMinutes) {
-                clockOutMinutes += 24 * 60; // Add 24 hours for overnight shift
-            }
+            if (clockOutMinutes < clockInMinutes) { clockOutMinutes += 24 * 60; }
             totalWorkMinutes += clockOutMinutes - clockInMinutes;
         });
-        const totalWorkHours = Math.floor(totalWorkMinutes / 60);
-        const remainingWorkMinutes = totalWorkMinutes % 60;
-        const workDurationText = `(${totalWorkHours} Jam ${remainingWorkMinutes} Menit)`;
-
+        const workDurationText = `(${formatDuration(totalWorkMinutes)})`;
         let totalOvertimeMinutes = 0;
         record.processedAttendance.forEach(att => {
-            if (att.isOvertime) {
-                totalOvertimeMinutes += (att.overtimeHours || 0) * 60 + (att.overtimeMinutes || 0);
-            }
+            if (att.isOvertime) { totalOvertimeMinutes += (att.overtimeHours || 0) * 60 + (att.overtimeMinutes || 0); }
         });
-        const totalOvertimeHours = Math.floor(totalOvertimeMinutes / 60);
-        const remainingOvertimeMinutes = totalOvertimeMinutes % 60;
-        const overtimeDurationText = `(${totalOvertimeHours} Jam ${remainingOvertimeMinutes} Menit)`;
-        // --- End of Calculations ---
-
+        const overtimeDurationText = `(${formatDuration(totalOvertimeMinutes)})`;
         const totalBonus = record.bonuses.reduce((sum, b) => sum + b.amount, 0);
         const totalDeduction = record.deductions.reduce((sum, d) => sum + d.amount, 0);
         const totalPendapatan = record.baseSalary + record.overtimePay + totalBonus;
-
-        const renderBonusRows = () => record.bonuses.map(b => `
-            <tr>
-                <td>${b.notes}</td>
-                <td class="currency">${formatCurrency(b.amount)}</td>
-            </tr>
-        `).join('');
-
-        const renderDeductionRows = () => record.deductions.map(d => `
-            <tr>
-                <td>${d.notes}</td>
-                <td class="currency">(${formatCurrency(d.amount)})</td>
-            </tr>
-        `).join('');
-        
-        const content = `
-        <html>
-            <head>
-                <title>Slip Gaji - ${employee.name}</title>
-                <style>
-                    body {
-                        font-family: sans-serif;
-                        font-size: 10pt;
-                        color: #333;
-                    }
-                    .container {
-                        width: 100%;
-                        max-width: 800px;
-                        margin: auto;
-                    }
-                    .header {
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: flex-start;
-                        padding-bottom: 10px;
-                        border-bottom: 2px solid #000;
-                    }
-                    .header-left h1 {
-                        font-size: 18pt;
-                        font-weight: bold;
-                        margin: 0;
-                        line-height: 1;
-                    }
-                    .header-left p {
-                        font-size: 9pt;
-                        margin: 4px 0 0 0;
-                        line-height: 1.3;
-                    }
-                    .header-right {
-                        text-align: right;
-                    }
-                    .header-right h2 {
-                        font-size: 16pt;
-                        font-weight: bold;
-                        margin: 0;
-                    }
-                    .header-right p {
-                        font-size: 10pt;
-                        margin: 2px 0 0 0;
-                    }
-                    .content {
-                        margin-top: 10px;
-                    }
-                    table {
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin-bottom: 20px;
-                    }
-                    th, td {
-                        padding: 6px;
-                        text-align: left;
-                    }
-                    th {
-                        background-color: #f2f2f2;
-                        border-bottom: 1px solid #ccc;
-                    }
-                    .details-table td {
-                        border-bottom: 1px solid #eee;
-                    }
-                    .currency {
-                        text-align: right;
-                    }
-                    .summary-section {
-                        margin-top: 10px;
-                        padding-top: 10px;
-                        border-top: 1px solid #ccc;
-                    }
-                    .summary-item {
-                        display: flex;
-                        justify-content: space-between;
-                        padding: 4px 0;
-                    }
-                    .total {
-                        font-weight: bold;
-                        font-size: 12pt;
-                    }
-                    .duration-text {
-                        font-size: 8pt;
-                        color: #555;
-                        display: block;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <div class="header-left">
-                            <h1>Nala Media Digital Printing</h1>
-                            <p>
-                                Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar<br/>
-                                Telp/WA: 0813-9872-7722
-                            </p>
-                        </div>
-                        <div class="header-right">
-                            <h2>SLIP GAJI</h2>
-                            <p><strong>${employee.name}</strong></p>
-                            <p>Periode: ${new Date(record.startDate).toLocaleDateString('id-ID')} - ${new Date(record.endDate).toLocaleDateString('id-ID')}</p>
-                        </div>
-                    </div>
-
-                    <div class="content">
-                        <div style="display: flex; justify-content: space-between; gap: 30px;">
-                            <div style="flex: 1;">
-                                <h3>Pendapatan</h3>
-                                <table class="details-table">
-                                    <tbody>
-                                        <tr>
-                                            <td>Gaji Pokok <span class="duration-text">${workDurationText}</span></td>
-                                            <td class="currency">${formatCurrency(record.baseSalary)}</td>
-                                        </tr>
-                                        <tr>
-                                            <td>Lembur <span class="duration-text">${overtimeDurationText}</span></td>
-                                            <td class="currency">${formatCurrency(record.overtimePay)}</td>
-                                        </tr>
-                                        ${renderBonusRows()}
-                                        <tr style="font-weight: bold; background-color: #f9f9f9;">
-                                            <td>Total Pendapatan</td>
-                                            <td class="currency">${formatCurrency(totalPendapatan)}</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div style="flex: 1;">
-                                <h3>Potongan</h3>
-                                <table class="details-table">
-                                    <tbody>
-                                        ${renderDeductionRows()}
-                                        <tr style="font-weight: bold; background-color: #f9f9f9;">
-                                            <td>Total Potongan</td>
-                                            <td class="currency">(${formatCurrency(totalDeduction)})</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        <div class="summary-section">
-                             <div class="summary-item total" style="background-color: #f0f0f0; padding: 10px; border-radius: 5px;">
-                                <span>GAJI BERSIH (Take Home Pay)</span>
-                                <span>${formatCurrency(record.totalSalary)}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </body>
-        </html>
-        `;
-
+        const renderBonusRows = () => record.bonuses.map(b => `<tr><td>${b.notes}</td><td class="currency">${formatCurrency(b.amount)}</td></tr>`).join('');
+        const renderDeductionRows = () => record.deductions.map(d => `<tr><td>${d.notes}</td><td class="currency">(${formatCurrency(d.amount)})</td></tr>`).join('');
+        const content = `<html><head><title>Slip Gaji - ${employee.name}</title><style>body{font-family:sans-serif;font-size:10pt;color:#333}.container{width:100%;max-width:800px;margin:auto}.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid #000}.header-left h1{font-size:18pt;font-weight:bold;margin:0;line-height:1}.header-left p{font-size:9pt;margin:4px 0 0 0;line-height:1.3}.header-right{text-align:right}.header-right h2{font-size:16pt;font-weight:bold;margin:0}.header-right p{font-size:10pt;margin:2px 0 0 0}.content{margin-top:10px}table{width:100%;border-collapse:collapse;margin-bottom:20px}th,td{padding:6px;text-align:left}th{background-color:#f2f2f2;border-bottom:1px solid #ccc}.details-table td{border-bottom:1px solid #eee}.currency{text-align:right}.summary-section{margin-top:10px;padding-top:10px;border-top:1px solid #ccc}.summary-item{display:flex;justify-content:space-between;padding:4px 0}.total{font-weight:bold;font-size:12pt}.duration-text{font-size:8pt;color:#555;display:block}</style></head><body><div class="container"><div class="header"><div class="header-left"><h1>Nala Media Digital Printing</h1><p>Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar<br/>Telp/WA: 0813-9872-7722</p></div><div class="header-right"><h2>SLIP GAJI</h2><p><strong>${employee.name}</strong></p><p>Periode: ${new Date(record.startDate).toLocaleDateString('id-ID')} - ${new Date(record.endDate).toLocaleDateString('id-ID')}</p></div></div><div class="content"><div style="display:flex;justify-content:space-between;gap:30px"><div style="flex:1"><h3>Pendapatan</h3><table class="details-table"><tbody><tr><td>Gaji Pokok <span class="duration-text">${workDurationText}</span></td><td class="currency">${formatCurrency(record.baseSalary)}</td></tr><tr><td>Lembur <span class="duration-text">${overtimeDurationText}</span></td><td class="currency">${formatCurrency(record.overtimePay)}</td></tr>${renderBonusRows()}<tr style="font-weight:bold;background-color:#f9f9f9"><td>Total Pendapatan</td><td class="currency">${formatCurrency(totalPendapatan)}</td></tr></tbody></table></div><div style="flex:1"><h3>Potongan</h3><table class="details-table"><tbody>${renderDeductionRows()}<tr style="font-weight:bold;background-color:#f9f9f9"><td>Total Potongan</td><td class="currency">(${formatCurrency(totalDeduction)})</td></tr></tbody></table></div></div><div class="summary-section"><div class="summary-item total" style="background-color:#f0f0f0;padding:10px;border-radius:5px"><span>GAJI BERSIH (Take Home Pay)</span><span>${formatCurrency(record.totalSalary)}</span></div></div></div></div></body></html>`;
         const printWindow = window.open('', '_blank');
-        if (printWindow) {
-            printWindow.document.write(content);
-            printWindow.document.close();
-            printWindow.focus();
-            setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
-        }
+        if (printWindow) { printWindow.document.write(content); printWindow.document.close(); printWindow.focus(); setTimeout(() => { printWindow.print(); printWindow.close(); }, 250); }
     };
-
-    const sortedAttendance = useMemo(() => [...availableAttendance].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [availableAttendance]);
     
     const filteredPayrollRecords = useMemo(() => {
         return payrollRecords
@@ -601,24 +516,80 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
         return filteredPayrollRecords.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     }, [filteredPayrollRecords, currentPage]);
+
+    const handleResetFilters = () => {
+        setFilterEmployeeId('');
+        setFilterStartDate('');
+        setFilterEndDate('');
+    };
+
+    const handleRevertClick = (recordId: number) => {
+        if (window.confirm('Anda yakin ingin mengembalikan riwayat gaji ini? Tindakan ini akan menghapus catatan gaji dan mengembalikan data absensi ke daftar absensi kerja.')) {
+            onRevertPayroll(recordId);
+        }
+    };
     
     // UI RENDER METHODS
     const TabButton: React.FC<{ label: string; tabKey: string; }> = ({ label, tabKey }) => (
         <button onClick={() => setActiveTab(tabKey)} className={`${ activeTab === tabKey ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}>{label}</button>
     );
 
-    const renderAttendanceTab = () => (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-            <div className="lg:col-span-2"><h3 className="text-lg font-semibold text-gray-700 mb-4">Form Absensi</h3><form onSubmit={handleAddAttendanceSubmit} className="space-y-4"><div><label className="block text-sm font-medium text-gray-700">Karyawan</label><select value={salaryId} onChange={e => setSalaryId(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md" required><option value="">Pilih Karyawan</option>{employeesWithSalary.map(e => <option key={e.salaryId} value={e.salaryId}>{e.name}</option>)}</select></div><div><label className="block text-sm font-medium text-gray-700">Devisi</label><input type="text" value={division} readOnly className="mt-1 w-full p-2 border rounded-md bg-gray-100" /></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700">Tanggal Absen</label><input type="date" value={attendanceDate} onChange={e => setAttendanceDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" /></div><div><label className="block text-sm font-medium text-gray-700">Shift</label><select value={shift} onChange={e => setShift(e.target.value as 'Pagi' | 'Sore')} className="mt-1 w-full p-2 border bg-white rounded-md"><option value="Pagi">Pagi</option><option value="Sore">Sore</option></select></div></div><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700">Jam Masuk</label><input type="time" value={clockIn} onChange={e => setClockIn(e.target.value)} className="mt-1 w-full p-2 border rounded-md" /></div><div><label className="block text-sm font-medium text-gray-700">Jam Keluar</label><input type="time" value={clockOut} onChange={e => setClockOut(e.target.value)} className="mt-1 w-full p-2 border rounded-md" /></div></div><div><label className="flex items-center space-x-2"><input type="checkbox" checked={isOvertime} onChange={e => setIsOvertime(e.target.checked)} className="h-4 w-4 rounded text-pink-600 focus:ring-pink-500" /><span className="text-sm font-medium text-gray-700">Lembur</span></label></div>{isOvertime && (<div className="p-4 border rounded-md bg-gray-50 space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-gray-700">Jam Lembur</label><input type="number" value={overtimeHours} onChange={e => setOvertimeHours(e.target.value)} className="mt-1 w-full p-2 border rounded-md" min="0" /></div><div><label className="block text-sm font-medium text-gray-700">Menit Lembur</label><input type="number" value={overtimeMinutes} onChange={e => setOvertimeMinutes(e.target.value)} className="mt-1 w-full p-2 border rounded-md" min="0" max="59" /></div></div><div><label className="block text-sm font-medium text-gray-700">Catatan Lembur</label><textarea value={overtimeNotes} onChange={e => setOvertimeNotes(e.target.value)} rows={2} className="mt-1 w-full p-2 border rounded-md" placeholder="e.g., Menyelesaikan pekerjaan..."></textarea></div></div>)}<div className="pt-2"><button type="submit" className="w-full bg-pink-600 text-white py-2.5 rounded-lg font-bold hover:bg-pink-700">Simpan Absensi</button></div></form></div>
-            <div className="lg:col-span-3"><h3 className="text-lg font-semibold text-gray-700 mb-4">Riwayat Absensi</h3><div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">{sortedAttendance.length > 0 ? (<div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase">Tanggal</th><th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase">Nama</th><th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase">Shift</th><th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase">Jam Kerja</th><th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase">Lembur</th><th className="py-2 px-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{sortedAttendance.map(item => { const employeeData = employeesWithSalary.find(e => e.salaryId === item.salaryId); const overtimeText = item.isOvertime ? `${item.overtimeHours || 0}j ${item.overtimeMinutes || 0}m` : '-'; return (<tr key={item.id}><td className="py-2 px-3 text-sm">{new Date(item.date).toLocaleDateString('id-ID', {day:'2-digit', month:'short'})}</td><td className="py-2 px-3 text-sm font-medium">{employeeData?.name || 'N/A'}</td><td className="py-2 px-3 text-sm">{item.shift}</td><td className="py-2 px-3 text-sm">{item.clockIn} - {item.clockOut}</td><td className="py-2 px-3 text-sm">{overtimeText}</td><td className="py-2 px-3 text-sm"><button onClick={() => onDeleteAttendance(item.id)} className="text-red-500 hover:text-red-700"><TrashIcon className="h-4 w-4" /></button></td></tr>)})}</tbody></table></div>) : (<div className="flex items-center justify-center h-full text-center text-gray-500 py-16"><p>Belum ada data absensi yang perlu diproses.</p></div>)}</div></div>
-        </div>
-    );
+    const renderAttendanceTab = () => {
+        const attendanceSummary = employeesWithSalary.map(emp => {
+            const empAttendance = availableAttendance.filter(att => {
+                const salary = salaries.find(s => s.id === att.salaryId);
+                return salary?.employeeId === emp.employeeId;
+            });
+            let regularMinutes = 0;
+            let overtimeMinutes = 0;
+            empAttendance.forEach(att => {
+                const clockInMins = timeToMinutes(att.clockIn);
+                let clockOutMins = timeToMinutes(att.clockOut);
+                if (clockOutMins < clockInMins) clockOutMins += 24 * 60;
+                regularMinutes += clockOutMins - clockInMins;
+                if (att.isOvertime) {
+                    overtimeMinutes += (att.overtimeHours || 0) * 60 + (att.overtimeMinutes || 0);
+                }
+            });
+            return { ...emp, regularMinutes, overtimeMinutes };
+        });
+
+        return (
+            <div className="overflow-x-auto">
+                <table className="min-w-full bg-white">
+                    <thead className="bg-gray-50">
+                        <tr>
+                            <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Nama</th>
+                            <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Devisi</th>
+                            <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Jumlah Jam Regular</th>
+                            <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Jumlah Jam Lembur</th>
+                            <th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                        {attendanceSummary.map(summary => (
+                            <tr key={summary.employeeId}>
+                                <td className="py-4 px-4 font-medium">{summary.name}</td>
+                                <td className="py-4 px-4">{summary.division}</td>
+                                <td className="py-4 px-4">{formatDuration(summary.regularMinutes)}</td>
+                                <td className="py-4 px-4">{formatDuration(summary.overtimeMinutes)}</td>
+                                <td className="py-4 px-4 space-x-2">
+                                    <button onClick={() => setDetailModalEmployee(summary)} className="bg-cyan-100 text-cyan-800 px-3 py-1 rounded-md text-xs font-semibold hover:bg-cyan-200">Perbarui</button>
+                                    <button onClick={() => handleResetAttendance(summary.employeeId)} className="bg-red-100 text-red-800 px-3 py-1 rounded-md text-xs font-semibold hover:bg-red-200">Reset</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
 
     const renderSummaryTab = () => (
         <div>
             <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-semibold text-gray-700">Ringkasan Gaji Karyawan</h3><button onClick={() => setIsFilterVisible(!isFilterVisible)} className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"><FilterIcon className="h-4 w-4" /><span>{isFilterVisible ? 'Sembunyikan' : 'Tampilkan'} Filter</span></button></div>
-            {isFilterVisible && (<div className="bg-gray-50 p-4 rounded-lg mb-6 border"><div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"><select value={filterEmployeeId} onChange={e => setFilterEmployeeId(e.target.value)} className="p-2 border rounded-md bg-white text-sm"><option value="">Pilih Karyawan</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select><input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" /><input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" /><button onClick={handleAmbilAbsen} className="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 w-full">Ambil Absen</button></div></div>)}
-            <div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Karyawan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Devisi</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Periode</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Total Gaji</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{paginatedPayrollRecords.map(record => { const emp = employees.find(e => e.id === record.employeeId); return (<tr key={record.id}><td className="py-4 px-4 font-medium">{emp?.name || 'N/A'}</td><td className="py-4 px-4">{emp?.division || 'N/A'}</td><td className="py-4 px-4 text-sm">{`${new Date(record.startDate).toLocaleDateString('id-ID')} - ${new Date(record.endDate).toLocaleDateString('id-ID')}`}</td><td className="py-4 px-4 font-semibold">{formatCurrency(record.totalSalary)}</td><td className="py-4 px-4 space-x-2"><button onClick={() => handleEditPayroll(record)} className="p-1.5 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4"/></button><button onClick={() => handlePrintPayslip(record)} className="p-1.5 text-gray-500 hover:text-gray-800"><PrinterIcon className="h-4 w-4"/></button><button onClick={() => onRevertPayroll(record.id)} className="p-1.5 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4"/></button></td></tr>);})}</tbody></table>{filteredPayrollRecords.length === 0 && (<div className="text-center py-16 text-gray-500"><p>Belum ada data gaji yang diproses.</p></div>)}</div>
+            {isFilterVisible && (<div className="bg-gray-50 p-4 rounded-lg mb-6 border"><div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"><select value={filterEmployeeId} onChange={e => setFilterEmployeeId(e.target.value)} className="p-2 border rounded-md bg-white text-sm"><option value="">Pilih Karyawan</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select><input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" /><input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" /><div className="flex space-x-2 md:col-span-1"><button onClick={handleAmbilAbsen} className="bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 w-full">Ambil Absen</button><button onClick={handleResetFilters} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-300 w-full">Reset</button></div></div></div>)}
+            <div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Karyawan</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Devisi</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Periode</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Total Gaji</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th></tr></thead><tbody className="divide-y divide-gray-200">{paginatedPayrollRecords.map(record => { const emp = employees.find(e => e.id === record.employeeId); return (<tr key={record.id}><td className="py-4 px-4 font-medium">{emp?.name || 'N/A'}</td><td className="py-4 px-4">{emp?.division || 'N/A'}</td><td className="py-4 px-4 text-sm">{`${new Date(record.startDate).toLocaleDateString('id-ID')} - ${new Date(record.endDate).toLocaleDateString('id-ID')}`}</td><td className="py-4 px-4 font-semibold">{formatCurrency(record.totalSalary)}</td><td className="py-4 px-4 space-x-2"><button onClick={() => handleEditPayroll(record)} className="p-1.5 text-gray-500 hover:text-blue-600" title="Edit Bonus/Potongan"><PencilIcon className="h-4 w-4"/></button><button onClick={() => handlePrintPayslip(record)} className="p-1.5 text-gray-500 hover:text-gray-800" title="Cetak Slip Gaji"><PrinterIcon className="h-4 w-4"/></button><button onClick={() => handleRevertClick(record.id)} className="p-1.5 text-gray-500 hover:text-green-600" title="Kembalikan ke Absen"><ArrowUturnLeftIcon className="h-4 w-4" /></button><button onClick={() => onDeletePayrollPermanently(record)} className="p-1.5 text-gray-500 hover:text-red-600" title="Hapus Permanen"><TrashIcon className="h-4 w-4"/></button></td></tr>);})}</tbody></table>{filteredPayrollRecords.length === 0 && (<div className="text-center py-16 text-gray-500"><p>Belum ada data gaji yang diproses.</p></div>)}</div>
              <Pagination
                 totalItems={filteredPayrollRecords.length}
                 itemsPerPage={ITEMS_PER_PAGE}
@@ -639,6 +610,37 @@ const Payroll: React.FC<PayrollProps> = ({ salaries, employees, attendance, payr
     
     return (
         <div className="bg-white p-6 rounded-xl shadow-md">
+            {detailModalEmployee && (
+                <AttendanceDetailModal
+                    employee={detailModalEmployee}
+                    attendanceRecords={availableAttendance.filter(att => {
+                        const salary = salaries.find(s => s.id === att.salaryId);
+                        return salary?.employeeId === detailModalEmployee.employeeId;
+                    })}
+                    onClose={() => setDetailModalEmployee(null)}
+                    onAdd={() => {
+                        setDetailModalEmployee(null); // Close detail modal first
+                        setFormModalState({ isOpen: true, employee: detailModalEmployee });
+                    }}
+                    onEdit={(record) => {
+                        setDetailModalEmployee(null); // Close detail modal first
+                        setFormModalState({ isOpen: true, employee: detailModalEmployee, recordToEdit: record });
+                    }}
+                    onDelete={handleDeleteSingleAttendance}
+                />
+            )}
+            {formModalState.isOpen && (
+                 <AttendanceFormModal
+                    employee={formModalState.employee}
+                    recordToEdit={formModalState.recordToEdit}
+                    onClose={() => setFormModalState({ isOpen: false, employee: null })}
+                    onSave={handleSaveAttendance}
+                    allAttendanceForEmployee={availableAttendance.filter(att => {
+                         const salary = salaries.find(s => s.id === att.salaryId);
+                         return salary?.employeeId === formModalState.employee.employeeId;
+                    })}
+                />
+            )}
             <h2 className="text-xl font-bold">Absensi dan Gaji</h2>
             {accessibleTabs.length > 1 && (
                  <div className="border-b border-gray-200 mt-4">

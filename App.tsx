@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -586,7 +585,7 @@ const App: React.FC = () => {
             productionStatus: 'Proses Cetak'
         };
         const { error } = await supabase.from('receivables').insert(newReceivable);
-        if (error) { alert(`Gagal proses order: ${error.message}`); return; }
+        if (error) { alert(`Gagal proses order: ${error?.message}`); return; }
     }
   }, [allOrders, receivables, notificationSettings]);
 
@@ -867,7 +866,13 @@ const App: React.FC = () => {
   const handleDeleteSalary = (id: number) => genericDeleteHandler('salaries', id, setSalaries);
 
   const handleAddAttendance = (a: Omit<AttendanceData, 'id'>) => genericAddHandler('attendance', a, setAttendance);
+  const handleUpdateAttendance = (a: AttendanceData) => genericUpdateHandler('attendance', a, setAttendance);
   const handleDeleteAttendance = (id: number) => genericDeleteHandler('attendance', id, setAttendance);
+  const handleBulkDeleteAttendance = useCallback(async (ids: number[]) => {
+      if (ids.length === 0) return;
+      const { error } = await supabase.from('attendance').delete().in('id', ids);
+      if (error) { alert(`Gagal mereset absensi: ${error.message}`); }
+  }, []);
 
   const handleProcessPayroll = useCallback(async (employeeId: number, startDate: string, endDate: string, baseSalary: number, overtimePay: number, bonuses: Bonus[], deductions: Deduction[], processedAttendance: AttendanceData[]) => {
       const totalSalary = baseSalary + overtimePay + bonuses.reduce((s, b) => s + b.amount, 0) - deductions.reduce((s, d) => s + d.amount, 0);
@@ -879,7 +884,30 @@ const App: React.FC = () => {
   
   const handleUpdatePayroll = (p: PayrollRecord) => genericUpdateHandler('payroll_records', p, setPayrollRecords);
   const handleRevertPayroll = (id: number) => genericDeleteHandler('payroll_records', id, setPayrollRecords);
-  
+  const handleDeletePayrollPermanently = useCallback(async (record: PayrollRecord) => {
+    if (!window.confirm("Anda yakin ingin menghapus riwayat Gaji Ini? Tindakan ini akan menghapus data absensi terkait secara permanen dan tidak dapat dibatalkan.")) {
+        return;
+    }
+
+    const attendanceIds = record.processedAttendance.map(a => a.id);
+
+    if (attendanceIds.length > 0) {
+        const { error: attError } = await supabase.from('attendance').delete().in('id', attendanceIds);
+        if (attError) {
+            alert(`Gagal menghapus data absensi terkait: ${attError.message}`);
+            return;
+        }
+    }
+
+    const { error: payrollError } = await supabase.from('payroll_records').delete().eq('id', record.id);
+    if (payrollError) {
+        alert(`Gagal menghapus riwayat gaji: ${payrollError.message}`);
+        return;
+    }
+    
+    alert("Riwayat gaji dan data absensi terkait berhasil dihapus permanen.");
+  }, []);
+
   const handleAddLegacyMonthlyIncome = (i: Omit<LegacyMonthlyIncome, 'id'>) => genericAddHandler('legacy_data', i, setLegacyMonthlyIncomes as any);
   const handleUpdateLegacyMonthlyIncome = (i: LegacyMonthlyIncome) => genericUpdateHandler('legacy_data', i, setLegacyMonthlyIncomes as any);
   const handleDeleteLegacyMonthlyIncome = (id: number) => genericDeleteHandler('legacy_data', id, setLegacyMonthlyIncomes as any);
@@ -963,7 +991,7 @@ const App: React.FC = () => {
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
       case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
       case 'production': return <Production boardData={boardData} allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} onProductionMove={handleProductionMove} onDeliverOrder={handleDeliverOrder} onCancelQueue={handleCancelQueue} />;
-      case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onDeleteAttendance={handleDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} />;
+      case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onUpdateAttendance={handleUpdateAttendance} onDeleteAttendance={handleDeleteAttendance} onBulkDeleteAttendance={handleBulkDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} onDeletePayrollPermanently={handleDeletePayrollPermanently} />;
       case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} onAddProduct={handleAddProduct} onAddCategory={handleAddCategory} onAddFinishing={handleAddFinishing} onAddCustomer={handleAddCustomer} onAddSupplier={handleAddSupplier} onAddEmployee={handleAddEmployee} />;
       case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
       case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyMonthlyIncomes={legacyMonthlyIncomes} legacyMonthlyExpenses={legacyMonthlyExpenses} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onAddLegacyMonthlyIncome={handleAddLegacyMonthlyIncome} onUpdateLegacyMonthlyIncome={handleUpdateLegacyMonthlyIncome} onDeleteLegacyMonthlyIncome={handleDeleteLegacyMonthlyIncome} onAddLegacyMonthlyExpense={handleAddLegacyMonthlyExpense} onUpdateLegacyMonthlyExpense={handleUpdateLegacyMonthlyExpense} onDeleteLegacyMonthlyExpense={handleDeleteLegacyMonthlyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onAddAsset={handleAddAsset} onAddDebt={handleAddDebt} />;

@@ -40,3 +40,4 @@ export const ArrowUpTrayIcon: React.FC<{className?: string}> = ({className}) => 
 export const ChevronDownIcon: React.FC<{ className?: string }> = ({ className }) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></Icon>;
 export const MagnifyingGlassIcon: React.FC<{className?: string}> = ({className}) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></Icon>;
 export const CheckIcon: React.FC<{className?: string}> = ({className}) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></Icon>;
+export const ArrowUturnLeftIcon: React.FC<{className?: string}> = ({className}) => <Icon className={className}><path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" /></Icon>;
