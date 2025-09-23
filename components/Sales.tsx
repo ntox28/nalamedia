@@ -730,6 +730,7 @@ const Sales: React.FC<SalesProps> = ({
   };
   
   const handlePrintSPK = (order: SavedOrder) => {
+      const totalItems = order.orderItems.reduce((sum, item) => sum + item.qty, 0);
       const printContent = `
         <html>
   <head>
@@ -824,6 +825,7 @@ const Sales: React.FC<SalesProps> = ({
       }).join('')}
 
       <div class="divider"></div>
+      <div class="center customer-name">JUMLAH ITEM : ${totalItems}</div>
       <div class="attention-box">
         <div class="center bold">PERHATIAN</div>
         <div class="attention-small center">- - - - - - - - - - - - - - - - - - - - - - - - -</div>
