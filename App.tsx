@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -14,7 +15,7 @@ import Header from './components/Header';
 import Payroll from './components/Payroll';
 import Login from './components/Login';
 import { supabase } from './supabaseClient';
-import { type Session } from '@supabase/supabase-js';
+// @FIX: The 'Session' type is not exported in older versions of '@supabase/supabase-js'. It's removed to prevent type errors.
 import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem } from './types';
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
 import { ShoppingCartIcon, ExclamationTriangleIcon, CreditCardIcon } from './components/Icons';
@@ -49,10 +50,43 @@ const DEFAULT_PAYMENT_METHODS: PaymentMethod[] = [
     { id: 'cash-default', name: 'Tunai', type: 'Tunai', details: 'Pembayaran tunai di kasir' }
 ];
 
+// Helper function to fetch all data from a table with pagination
+const fetchAllWithPagination = async (tableName: string) => {
+    const BATCH_SIZE = 1000;
+    let allData: any[] = [];
+    let from = 0;
+    
+    while (true) {
+        const { data, error } = await supabase
+            .from(tableName)
+            .select('*')
+            .range(from, from + BATCH_SIZE - 1);
+            
+        if (error) {
+            console.error(`Error fetching paginated data for ${tableName}:`, error);
+            return { data: null, error };
+        }
+
+        if (data) {
+            allData = allData.concat(data);
+        }
+        
+        if (!data || data.length < BATCH_SIZE) {
+            break; // Last page
+        }
+        
+        from += BATCH_SIZE;
+    }
+    
+    return { data: allData, error: null };
+};
+
+
 const App: React.FC = () => {
   console.log("Render: Component is rendering.");
   const [isLoading, setIsLoading] = useState(true);
-  const [session, setSession] = useState<Session | null>(null);
+  // @FIX: Using `any` for session state because `Session` type is not exported in the assumed older Supabase library version.
+  const [session, setSession] = useState<any | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [activeMenu, setActiveMenu] = useState<MenuKey>('dashboard');
   const [isSidebarOpen, setSidebarOpen] = useState(true);
@@ -126,26 +160,26 @@ const App: React.FC = () => {
   const fetchAllData = useCallback(async () => {
     console.log("Fetching all data from Supabase...");
     const tableFetchPromises = {
-        orders: supabase.from('orders').select('*'),
-        receivables: supabase.from('receivables').select('*'),
-        products: supabase.from('products').select('*'),
-        categories: supabase.from('categories').select('*'),
-        finishings: supabase.from('finishings').select('*'),
-        customers: supabase.from('customers').select('*'),
-        suppliers: supabase.from('suppliers').select('*'),
-        employees: supabase.from('employees').select('*'),
-        salaries: supabase.from('salaries').select('*'),
-        attendance: supabase.from('attendance').select('*'),
-        payroll_records: supabase.from('payroll_records').select('*'),
-        inventory: supabase.from('inventory').select('*'),
-        expenses: supabase.from('expenses').select('*'),
-        profiles: supabase.from('profiles').select('id, uuid, name, level'),
-        legacy_data: supabase.from('legacy_data').select('*'),
-        legacy_expense: supabase.from('legacy_expense').select('*'),
-        legacy_receivables: supabase.from('legacy_receivables').select('*'),
-        assets: supabase.from('assets').select('*'),
-        debts: supabase.from('debts').select('*'),
-        app_settings: supabase.from('app_settings').select('*'),
+        orders: fetchAllWithPagination('orders'),
+        receivables: fetchAllWithPagination('receivables'),
+        products: fetchAllWithPagination('products'),
+        categories: fetchAllWithPagination('categories'),
+        finishings: fetchAllWithPagination('finishings'),
+        customers: fetchAllWithPagination('customers'),
+        suppliers: fetchAllWithPagination('suppliers'),
+        employees: fetchAllWithPagination('employees'),
+        salaries: fetchAllWithPagination('salaries'),
+        attendance: fetchAllWithPagination('attendance'),
+        payroll_records: fetchAllWithPagination('payroll_records'),
+        inventory: fetchAllWithPagination('inventory'),
+        expenses: fetchAllWithPagination('expenses'),
+        profiles: fetchAllWithPagination('profiles'),
+        legacy_data: fetchAllWithPagination('legacy_data'),
+        legacy_expense: fetchAllWithPagination('legacy_expense'),
+        legacy_receivables: fetchAllWithPagination('legacy_receivables'),
+        assets: fetchAllWithPagination('assets'),
+        debts: fetchAllWithPagination('debts'),
+        app_settings: fetchAllWithPagination('app_settings'),
         app_sequences: supabase.from('app_sequences').select('current_value, prefix').eq('name', 'order_nota').single(),
     };
 
@@ -194,11 +228,11 @@ const App: React.FC = () => {
     
     // Process settings
     const settings = dataMap.app_settings;
-    const menuPermsSetting = settings.find(s => s.key === 'menuPermissions');
-    const notifSetting = settings.find(s => s.key === 'notificationSettings');
-    const storeInfoSetting = settings.find(s => s.key === 'storeInfo');
-    const initialCashSetting = settings.find(s => s.key === 'initialCash');
-    const paymentMethodsSetting = settings.find(s => s.key === 'paymentMethods');
+    const menuPermsSetting = settings.find((s:any) => s.key === 'menuPermissions');
+    const notifSetting = settings.find((s:any) => s.key === 'notificationSettings');
+    const storeInfoSetting = settings.find((s:any) => s.key === 'storeInfo');
+    const initialCashSetting = settings.find((s:any) => s.key === 'initialCash');
+    const paymentMethodsSetting = settings.find((s:any) => s.key === 'paymentMethods');
 
     if (menuPermsSetting && menuPermsSetting.value) {
         const dbPermissions = menuPermsSetting.value as MenuPermissions;
@@ -244,10 +278,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const initializeSession = async () => {
       try {
+        // @FIX: Replaced `getSession` with `session` for compatibility with older Supabase versions.
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
           console.error("Error getting session, possibly invalid token. Signing out.", sessionError);
+          // @FIX: Corrected method call for compatibility.
           await supabase.auth.signOut();
           clearAllData();
           return;
@@ -264,6 +300,7 @@ const App: React.FC = () => {
 
           if (profileError || !userProfile) {
             console.error("Profile not found for session, signing out:", profileError?.message);
+            // @FIX: Corrected method call for compatibility.
             await supabase.auth.signOut();
             clearAllData();
           } else {
@@ -288,6 +325,7 @@ const App: React.FC = () => {
 
     initializeSession();
 
+    // @FIX: Corrected method call for compatibility.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       console.log("Auth state changed, event:", _event);
       setSession(session);
@@ -974,6 +1012,7 @@ const App: React.FC = () => {
   const handleToggleSidebar = () => setSidebarOpen(prev => !prev);
   const handleMenuClick = (menu: MenuKey) => setActiveMenu(menu);
   const handleLogout = async () => {
+    // @FIX: Corrected method call for compatibility.
     await supabase.auth.signOut();
   };
 

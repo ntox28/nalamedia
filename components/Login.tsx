@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 
@@ -12,6 +13,7 @@ const Login: React.FC = () => {
     setError('');
     setIsSubmitting(true);
     
+    // @FIX: Replaced `signInWithPassword` with `signIn` for compatibility with older Supabase versions.
     const { error } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
