@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Cog6ToothIcon, PlusCircleIcon, TrashIcon, PencilIcon, PrinterIcon, PlayIcon, ClipboardIcon, ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon, CurrencyDollarIcon } from './Icons';
-import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData, type ReceivableItem } from '../types';
+import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData, type ReceivableItem, type Profile } from '../types';
 
 const getInitialState = () => ({
   orderItems: [{ 
@@ -359,13 +360,15 @@ interface SalesProps {
   notePrefix: string;
   onUpdateNoteSettings: (prefix: string, startNumber: number) => void;
   receivables: ReceivableItem[];
+  profile: Profile | null;
+  onSaveLegacyOrder: (legacyOrder: SavedOrder) => void;
 }
 
 const Sales: React.FC<SalesProps> = ({ 
   unprocessedOrders, onSaveOrder, onUpdateOrder, onProcessOrder, onDeleteOrder, 
   products, categories, finishings, customers,
   allOrders, boardData, noteCounter, notePrefix, onUpdateNoteSettings,
-  receivables
+  receivables, profile, onSaveLegacyOrder
 }) => {
   const [orderItems, setOrderItems] = useState<OrderItemData[]>(getInitialState().orderItems);
   const [customer, setCustomer] = useState(getInitialState().customer);
@@ -375,7 +378,7 @@ const Sales: React.FC<SalesProps> = ({
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotaSettingsOpen, setIsNotaSettingsOpen] = useState(false);
-  const [isSimulationMode, setIsSimulationMode] = useState(false);
+  const [mode, setMode] = useState<'order' | 'simulation' | 'legacy'>('order');
   const [simulationResult, setSimulationResult] = useState<SavedOrder | null>(null);
 
   // State for customer combobox
@@ -608,16 +611,22 @@ const Sales: React.FC<SalesProps> = ({
     setEditingOrderId(null);
   }, []);
 
-  const handleModeChange = (isSim: boolean) => {
-    setIsSimulationMode(isSim);
-    if (isSim) {
+  const handleModeChange = (newMode: 'order' | 'simulation' | 'legacy') => {
+    if (mode === newMode) return;
+
+    if (editingOrderId) {
+        resetForm();
+    }
+    
+    setMode(newMode);
+    
+    if (newMode === 'simulation') {
         if (!SIMULATION_CUSTOMERS.includes(customer)) {
             setCustomer(SIMULATION_CUSTOMERS[0]);
+            setCustomerInputValue(SIMULATION_CUSTOMERS[0]);
         }
-    } else {
-        if (editingOrderId) {
-            resetForm();
-        } else if (SIMULATION_CUSTOMERS.includes(customer)) {
+    } else { // 'order' or 'legacy'
+        if (SIMULATION_CUSTOMERS.includes(customer)) {
             setCustomer('');
             setCustomerInputValue('');
         }
@@ -667,9 +676,12 @@ const Sales: React.FC<SalesProps> = ({
         totalPrice,
     };
 
-    if (isSimulationMode) {
+    if (mode === 'simulation') {
       setSimulationResult(orderData);
-    } else {
+    } else if (mode === 'legacy') {
+        onSaveLegacyOrder({ ...orderData, id: getNextNotaNumber() });
+        resetForm();
+    } else { // mode === 'order'
         if (editingOrderId) {
             onUpdateOrder({ ...orderData, id: editingOrderId });
             alert(`Order ${editingOrderId} berhasil diperbarui!`);
@@ -683,7 +695,7 @@ const Sales: React.FC<SalesProps> = ({
   };
   
   const handleEdit = (order: SavedOrder) => {
-      handleModeChange(false); // Switch to order mode when editing
+      handleModeChange('order'); // Switch to order mode when editing
       setEditingOrderId(order.id);
       setCustomer(order.customer);
       setCustomerInputValue(order.customer);
@@ -853,6 +865,12 @@ const Sales: React.FC<SalesProps> = ({
         }, 250);
       }
   };
+  
+  const canAccessLegacyInput = profile?.level === 'Admin' || profile?.level === 'Kasir';
+  const formTitle = 
+    mode === 'simulation' ? 'Simulasi Harga Cetak' :
+    mode === 'legacy' ? 'Masukan Piutang Lama' :
+    editingOrderId ? `Edit Order ${editingOrderId}` : 'Tambah Order Baru';
 
   return (
     <>
@@ -939,17 +957,22 @@ const Sales: React.FC<SalesProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
         <div className="lg:col-span-3 bg-white p-6 rounded-xl shadow-md">
           <div className="flex justify-between items-center mb-4 border-b pb-4">
-            <h2 className="text-xl font-bold">{isSimulationMode ? 'Simulasi Harga Cetak' : (editingOrderId ? `Edit Order ${editingOrderId}` : 'Tambah Order Baru')}</h2>
-            {!isSimulationMode && <button onClick={handleNewOrder} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-300">Buat Baru</button>}
+            <h2 className="text-xl font-bold">{formTitle}</h2>
+            {mode === 'order' && <button onClick={handleNewOrder} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-300">Buat Baru</button>}
           </div>
           
-           <div className="flex mb-6 border border-gray-200 rounded-lg p-1 bg-gray-100 max-w-sm">
-              <button type="button" onClick={() => handleModeChange(false)} className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${!isSimulationMode ? 'bg-white text-pink-600 shadow' : 'text-gray-600'}`}>
+           <div className="flex mb-6 border border-gray-200 rounded-lg p-1 bg-gray-100 max-w-md">
+              <button type="button" onClick={() => handleModeChange('order')} className={`w-1/3 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'order' ? 'bg-white text-pink-600 shadow' : 'text-gray-600'}`}>
                   Buat Order
               </button>
-              <button type="button" onClick={() => handleModeChange(true)} className={`w-1/2 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${isSimulationMode ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+              <button type="button" onClick={() => handleModeChange('simulation')} className={`w-1/3 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'simulation' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
                   Simulasi Harga
               </button>
+              {canAccessLegacyInput && (
+                 <button type="button" onClick={() => handleModeChange('legacy')} className={`w-1/3 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'legacy' ? 'bg-white text-amber-600 shadow' : 'text-gray-600'}`}>
+                    Piutang Lama
+                </button>
+              )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -957,8 +980,8 @@ const Sales: React.FC<SalesProps> = ({
               <div>
                 <label className="block text-sm font-medium">No. Nota (Otomatis)</label>
                 <div className="flex items-center mt-1">
-                  <input type="text" readOnly value={isSimulationMode ? 'SIMULASI' : (editingOrderId || getNextNotaNumber())} className="w-full p-2 border rounded-md bg-gray-100" />
-                  {!isSimulationMode && <button type="button" onClick={() => setIsNotaSettingsOpen(true)} className="ml-2 p-2 text-gray-500 hover:text-pink-600 transition-colors"><Cog6ToothIcon /></button>}
+                  <input type="text" readOnly value={mode === 'simulation' ? 'SIMULASI' : (editingOrderId || getNextNotaNumber())} className="w-full p-2 border rounded-md bg-gray-100" />
+                  {mode !== 'simulation' && <button type="button" onClick={() => setIsNotaSettingsOpen(true)} className="ml-2 p-2 text-gray-500 hover:text-pink-600 transition-colors"><Cog6ToothIcon /></button>}
                 </div>
               </div>
               <div>
@@ -966,7 +989,7 @@ const Sales: React.FC<SalesProps> = ({
                 <input type="date" id="order-date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="mt-1 w-full p-2 border rounded-md" />
               </div>
               
-              {isSimulationMode ? (
+              {mode === 'simulation' ? (
                  <div>
                     <label htmlFor="sim-customer" className="block text-sm font-medium">Tipe Pelanggan</label>
                     <select
@@ -1054,23 +1077,22 @@ const Sales: React.FC<SalesProps> = ({
             <div><button type="button" onClick={addItem} className="w-full flex items-center justify-center py-2 px-4 border-2 border-dashed rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><PlusCircleIcon className="mr-2"/>Tambah Item</button></div>
             <div className="border-t pt-6 flex justify-between items-center">
               <div><p className="text-sm">Estimasi Total</p><p className="text-2xl font-bold text-pink-600">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(totalPrice)}</p></div>
-              <button type="submit" className={`text-white py-3 px-8 rounded-lg font-bold ${isSimulationMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-pink-600 hover:bg-pink-700'}`}>
-                {isSimulationMode ? 'Lihat Rincian Simulasi' : (editingOrderId ? 'Update Order' : 'Simpan Order')}
+              <button type="submit" className={`text-white py-3 px-8 rounded-lg font-bold ${
+                    mode === 'simulation' ? 'bg-blue-600 hover:bg-blue-700' :
+                    mode === 'legacy' ? 'bg-amber-500 hover:bg-amber-600' :
+                    'bg-pink-600 hover:bg-pink-700'
+              }`}>
+                {
+                    mode === 'simulation' ? 'Lihat Rincian Simulasi' :
+                    mode === 'legacy' ? 'Simpan Piutang Lama' :
+                    editingOrderId ? 'Update Order' : 'Simpan Order'
+                }
               </button>
             </div>
           </form>
         </div>
         <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
-          {isSimulationMode ? (
-              <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 bg-blue-50 rounded-lg">
-                <CurrencyDollarIcon className="h-16 w-16 text-blue-400 mb-4" />
-                <h3 className="text-lg font-semibold text-blue-800">Mode Simulasi Harga</h3>
-                <p className="mt-2 text-sm max-w-sm">
-                  Isi formulir di sebelah kiri untuk menghitung estimasi harga bagi pelanggan.
-                  Hasil simulasi tidak akan disimpan dan tidak akan masuk ke antrian produksi.
-                </p>
-              </div>
-          ) : (
+          {mode === 'order' ? (
             <>
               <h2 className="text-xl font-bold mb-4 border-b pb-4">Order Hari Ini</h2>
               <div className="relative mb-4">
@@ -1135,6 +1157,23 @@ const Sales: React.FC<SalesProps> = ({
                 )}
               </div>
             </>
+          ) : mode === 'simulation' ? (
+              <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 bg-blue-50 rounded-lg">
+                <CurrencyDollarIcon className="h-16 w-16 text-blue-400 mb-4" />
+                <h3 className="text-lg font-semibold text-blue-800">Mode Simulasi Harga</h3>
+                <p className="mt-2 text-sm max-w-sm">
+                  Isi formulir di sebelah kiri untuk menghitung estimasi harga bagi pelanggan.
+                  Hasil simulasi tidak akan disimpan dan tidak akan masuk ke antrian produksi.
+                </p>
+              </div>
+          ) : ( // mode === 'legacy'
+            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 bg-amber-50 rounded-lg">
+                <CurrencyDollarIcon className="h-16 w-16 text-amber-500 mb-4" />
+                <h3 className="text-lg font-semibold text-amber-800">Mode Input Piutang Lama</h3>
+                <p className="mt-2 text-sm max-w-sm">
+                  Gunakan formulir ini untuk memasukkan data piutang dari order lama. Data yang disimpan akan langsung muncul di halaman Pembayaran dengan status "Data Lama".
+                </p>
+            </div>
           )}
         </div>
       </div>

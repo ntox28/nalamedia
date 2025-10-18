@@ -553,6 +553,43 @@ const App: React.FC = () => {
       setNoteCounter(prev => prev + 1);
   }, [noteCounter]);
 
+  const handleSaveLegacyOrder = useCallback(async (legacyOrder: SavedOrder) => {
+    // 1. Save the order
+    const { data: orderData, error: orderError } = await supabase.from('orders').insert(legacyOrder).select().single();
+    if (orderError || !orderData) {
+        alert(`Gagal menyimpan order data lama: ${orderError?.message}`);
+        return;
+    }
+
+    // 2. Increment nota counter
+    const { error: seqError } = await supabase.from('app_sequences').update({ current_value: noteCounter + 1 }).eq('name', 'order_nota');
+    if (seqError) console.error('Failed to update sequence for legacy order');
+    
+    // 3. Create a receivable with 'Data Lama' status
+    const dueDate = new Date(legacyOrder.orderDate);
+    dueDate.setDate(dueDate.getDate() + notificationSettings.defaultDueDateDays);
+    const newDueDate = dueDate.toISOString().substring(0, 10);
+
+    const newReceivable: Omit<ReceivableItem, 'payments'> = {
+        id: legacyOrder.id,
+        customer: legacyOrder.customer,
+        amount: legacyOrder.totalPrice,
+        due: newDueDate,
+        paymentStatus: 'Belum Lunas',
+        productionStatus: 'Data Lama'
+    };
+
+    const { error: receivableError } = await supabase.from('receivables').insert(newReceivable);
+    if (receivableError) {
+        alert(`Order data lama berhasil disimpan, tapi gagal membuat data piutang: ${receivableError.message}`);
+        return;
+    }
+    
+    setNoteCounter(prev => prev + 1);
+    alert(`Piutang lama ${legacyOrder.id} berhasil disimpan dan ditambahkan ke halaman Pembayaran.`);
+
+  }, [noteCounter, notificationSettings]);
+
   const handleUpdateOrder = useCallback(async (updatedOrder: SavedOrder) => {
       // First, update the order itself
       const { data: updatedOrderData, error: orderError } = await supabase
@@ -1025,7 +1062,7 @@ const App: React.FC = () => {
     }
     switch (activeMenu) {
       case 'dashboard': return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} legacyReceivables={legacyReceivables} />;
-      case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} receivables={receivables} />;
+      case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} receivables={receivables} profile={profile} onSaveLegacyOrder={handleSaveLegacyOrder} />;
       case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} legacyReceivables={legacyReceivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onPayLegacyReceivable={handlePayLegacyReceivable} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
       case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
