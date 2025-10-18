@@ -1121,6 +1121,13 @@ const Receivables: React.FC<ReceivablesProps> = ({
             </div>
         `;
     }).join('');
+    
+    const discountRow = (order.discount || 0) > 0 ? `
+        <tr>
+            <td class="label">Diskon:</td>
+            <td class="value">-${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(order.discount!)}</td>
+        </tr>
+    ` : '';
 
     const printContent = `
         <html>
@@ -1184,6 +1191,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                     </table>
                     <div class="divider"></div>
                     <table class="summary-table">
+                        ${discountRow}
                         <tr>
                             <td class="label">Bayar:</td>
                             <td class="value">${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(totalPaid)}</td>
