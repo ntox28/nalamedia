@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -308,7 +309,7 @@ const App: React.FC = () => {
       setSession(session);
       if (_event === 'SIGNED_OUT') {
         clearAllData();
-      } else if (_event === 'SIGNED_IN') { // REMOVED: || _event === 'TOKEN_REFRESHED'
+      } else if (_event === 'SIGNED_IN') {
         initializeSession();
       }
     });
