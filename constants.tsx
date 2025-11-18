@@ -51,6 +51,7 @@ export const MENU_ITEMS: MenuItem[] = [
       { key: 'finalRecap', label: 'Final Rekapitulasi' },
       { key: 'profitAndLoss', label: 'Laba Rugi' },
       { key: 'sales', label: 'Penjualan' },
+      { key: 'categorySales', label: 'Penjualan per Kategori' },
       { key: 'receivables', label: 'Piutang' },
       { key: 'inventory', label: 'Stok' },
       { key: 'assetsDebts', label: 'Aset dan Hutang' },

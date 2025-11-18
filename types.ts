@@ -337,5 +337,9 @@ export interface ReportsProps {
   onUpdateLegacyReceivable: (data: LegacyReceivable) => void;
   onDeleteLegacyReceivable: (id: number) => void;
   onAddAsset: (data: Omit<AssetItem, 'id'>) => void;
+  onUpdateAsset: (data: AssetItem) => void;
+  onDeleteAsset: (id: number) => void;
   onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
+  onUpdateDebt: (data: DebtItem) => void;
+  onDeleteDebt: (id: number) => void;
 }

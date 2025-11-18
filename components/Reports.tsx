@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
 import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon, ArrowUpTrayIcon } from './Icons';
@@ -40,6 +40,7 @@ const TABS = [
     { key: 'finalRecap', label: 'Final Rekapitulasi' },
     { key: 'profitAndLoss', label: 'Laba Rugi' },
     { key: 'sales', label: 'Penjualan' },
+    { key: 'categorySales', label: 'Penjualan per Kategori' },
     { key: 'receivables', label: 'Piutang' },
     { key: 'inventory', label: 'Stok' },
     { key: 'assetsDebts', label: 'Aset dan Hutang' },
@@ -273,25 +274,70 @@ const AssetsAndDebts: React.FC<{
     assets: AssetItem[];
     debts: DebtItem[];
     onAddAsset: (data: Omit<AssetItem, 'id'>) => void;
+    onUpdateAsset: (data: AssetItem) => void;
+    onDeleteAsset: (id: number) => void;
     onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
-}> = ({ assets, debts, onAddAsset, onAddDebt }) => {
+    onUpdateDebt: (data: DebtItem) => void;
+    onDeleteDebt: (id: number) => void;
+}> = ({ assets, debts, onAddAsset, onUpdateAsset, onDeleteAsset, onAddDebt, onUpdateDebt, onDeleteDebt }) => {
+    const [editingAsset, setEditingAsset] = useState<AssetItem | null>(null);
     const [assetName, setAssetName] = useState('');
     const [assetValue, setAssetValue] = useState('');
+
+    const [editingDebt, setEditingDebt] = useState<DebtItem | null>(null);
     const [debtName, setDebtName] = useState('');
     const [debtValue, setDebtValue] = useState('');
 
-    const handleAddAssetSubmit = (e: React.FormEvent) => {
+    useEffect(() => {
+        if (editingAsset) {
+            setAssetName(editingAsset.name);
+            setAssetValue(editingAsset.value.toString());
+        } else {
+            setAssetName('');
+            setAssetValue('');
+        }
+    }, [editingAsset]);
+
+    useEffect(() => {
+        if (editingDebt) {
+            setDebtName(editingDebt.name);
+            setDebtValue(editingDebt.value.toString());
+        } else {
+            setDebtName('');
+            setDebtValue('');
+        }
+    }, [editingDebt]);
+
+    const handleAssetSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onAddAsset({ name: assetName, value: Number(assetValue) });
-        setAssetName('');
-        setAssetValue('');
+        if (editingAsset) {
+            onUpdateAsset({ ...editingAsset, name: assetName, value: Number(assetValue) });
+        } else {
+            onAddAsset({ name: assetName, value: Number(assetValue) });
+        }
+        setEditingAsset(null);
     };
 
-    const handleAddDebtSubmit = (e: React.FormEvent) => {
+    const handleDebtSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onAddDebt({ name: debtName, value: Number(debtValue) });
-        setDebtName('');
-        setDebtValue('');
+        if (editingDebt) {
+            onUpdateDebt({ ...editingDebt, name: debtName, value: Number(debtValue) });
+        } else {
+            onAddDebt({ name: debtName, value: Number(debtValue) });
+        }
+        setEditingDebt(null);
+    };
+
+    const handleDeleteAssetClick = (asset: AssetItem) => {
+        if (window.confirm(`Anda yakin ingin menghapus aset "${asset.name}"?`)) {
+            onDeleteAsset(asset.id);
+        }
+    };
+
+    const handleDeleteDebtClick = (debt: DebtItem) => {
+        if (window.confirm(`Anda yakin ingin menghapus hutang "${debt.name}"?`)) {
+            onDeleteDebt(debt.id);
+        }
     };
 
     const totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
@@ -306,22 +352,29 @@ const AssetsAndDebts: React.FC<{
                     {formatCurrency(netWorth)}
                 </p>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Assets Column */}
                 <div className="space-y-4">
                     <h3 className="text-xl font-bold text-gray-800">Aset</h3>
-                    <form onSubmit={handleAddAssetSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
-                        <h4 className="font-semibold text-gray-700">Tambah Aset Baru</h4>
+                    <form onSubmit={handleAssetSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
+                        <h4 className="font-semibold text-gray-700">{editingAsset ? 'Edit Aset' : 'Tambah Aset Baru'}</h4>
                         <input value={assetName} onChange={e => setAssetName(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nama Aset (e.g., Mesin Cetak)" required />
                         <input type="number" value={assetValue} onChange={e => setAssetValue(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nilai Aset (Rp)" required />
-                        <button type="submit" className="w-full bg-cyan-600 text-white py-2 rounded-lg font-semibold hover:bg-cyan-700">Tambah Aset</button>
+                        <div className="flex space-x-2">
+                            <button type="submit" className="w-full bg-cyan-600 text-white py-2 rounded-lg font-semibold hover:bg-cyan-700">{editingAsset ? 'Update' : 'Tambah Aset'}</button>
+                            {editingAsset && <button type="button" onClick={() => setEditingAsset(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
+                        </div>
                     </form>
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-2 border rounded-lg p-2">
                         {assets.map(item => (
                             <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
-                                <p className="font-semibold text-gray-800">{item.name}</p>
-                                <p className="text-sm text-green-600 font-bold">{formatCurrency(item.value)}</p>
+                                <div>
+                                    <p className="font-semibold text-gray-800">{item.name}</p>
+                                    <p className="text-sm text-green-600 font-bold">{formatCurrency(item.value)}</p>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <button onClick={() => setEditingAsset(item)} className="p-1 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4" /></button>
+                                    <button onClick={() => handleDeleteAssetClick(item)} className="p-1 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4" /></button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -330,21 +383,28 @@ const AssetsAndDebts: React.FC<{
                         <span>{formatCurrency(totalAssets)}</span>
                     </div>
                 </div>
-
-                {/* Debts Column */}
                 <div className="space-y-4">
                     <h3 className="text-xl font-bold text-gray-800">Hutang</h3>
-                     <form onSubmit={handleAddDebtSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
-                        <h4 className="font-semibold text-gray-700">Tambah Hutang Baru</h4>
+                    <form onSubmit={handleDebtSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
+                        <h4 className="font-semibold text-gray-700">{editingDebt ? 'Edit Hutang' : 'Tambah Hutang Baru'}</h4>
                         <input value={debtName} onChange={e => setDebtName(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nama Hutang (e.g., Cicilan Bank)" required />
                         <input type="number" value={debtValue} onChange={e => setDebtValue(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nilai Hutang (Rp)" required />
-                        <button type="submit" className="w-full bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">Tambah Hutang</button>
+                        <div className="flex space-x-2">
+                            <button type="submit" className="w-full bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">{editingDebt ? 'Update' : 'Tambah Hutang'}</button>
+                            {editingDebt && <button type="button" onClick={() => setEditingDebt(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
+                        </div>
                     </form>
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-2 border rounded-lg p-2">
                         {debts.map(item => (
                             <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
-                                <p className="font-semibold text-gray-800">{item.name}</p>
-                                <p className="text-sm text-red-600 font-bold">{formatCurrency(item.value)}</p>
+                                <div>
+                                    <p className="font-semibold text-gray-800">{item.name}</p>
+                                    <p className="text-sm text-red-600 font-bold">{formatCurrency(item.value)}</p>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <button onClick={() => setEditingDebt(item)} className="p-1 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4" /></button>
+                                    <button onClick={() => handleDeleteDebtClick(item)} className="p-1 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4" /></button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -484,31 +544,35 @@ const Reports: React.FC<ReportsProps> = (props) => {
     onAddLegacyMonthlyIncome, onUpdateLegacyMonthlyIncome, onDeleteLegacyMonthlyIncome,
     onAddLegacyMonthlyExpense, onUpdateLegacyMonthlyExpense, onDeleteLegacyMonthlyExpense,
     onAddLegacyReceivable, onUpdateLegacyReceivable, onDeleteLegacyReceivable,
-    onAddAsset, onAddDebt
+    onAddAsset, onUpdateAsset, onDeleteAsset, onAddDebt, onUpdateDebt, onDeleteDebt
     } = props;
     const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`reports/${tab.key}`)), [menuPermissions]);
     const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
     const [currentPage, setCurrentPage] = useState(1);
     const [sortConfig, setSortConfig] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'noNota', order: 'desc' });
+    
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    
+    // States for sales report
+    const [salesMonth, setSalesMonth] = useState(currentMonth);
+    const [salesCustomer, setSalesCustomer] = useState('');
+    const [isSalesCustomerDropdownOpen, setIsSalesCustomerDropdownOpen] = useState(false);
 
-    const [isCustomerReportFilterVisible, setIsCustomerReportFilterVisible] = useState(false);
-    const [filterCustomer, setFilterCustomer] = useState('');
 
-
+    // States for receivables report
+    const [receivablesMonth, setReceivablesMonth] = useState(currentMonth);
+    const [receivablesCustomer, setReceivablesCustomer] = useState('');
+    const [isReceivablesCustomerDropdownOpen, setIsReceivablesCustomerDropdownOpen] = useState(false);
+    
     const { firstDay, lastDay } = getMonthDateRange();
-    const [filterStartDate, setFilterStartDate] = useState(firstDay);
-    const [filterEndDate, setFilterEndDate] = useState(lastDay);
+    const [categoryReportStartDate, setCategoryReportStartDate] = useState(firstDay);
+    const [categoryReportEndDate, setCategoryReportEndDate] = useState(lastDay);
 
     const years = useMemo(() => {
         const orderYears = allOrders.map(order => new Date(order.orderDate).getFullYear());
         return Array.from(new Set(orderYears)).sort((a, b) => b - a);
     }, [allOrders]);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
-     const uniqueCustomers = useMemo(() => {
-        const customerSet = new Set(allOrders.map(o => o.customer));
-        return Array.from(customerSet).sort();
-    }, [allOrders]);
     
     // States for legacy receivables tab
     const [legacyFilterCustomer, setLegacyFilterCustomer] = useState('');
@@ -516,6 +580,28 @@ const Reports: React.FC<ReportsProps> = (props) => {
     const [legacyFilterEndDate, setLegacyFilterEndDate] = useState('');
     const [isLegacyFilterVisible, setIsLegacyFilterVisible] = useState(false);
     const [isLegacyImportExportModalOpen, setIsLegacyImportExportModalOpen] = useState(false);
+    
+    const handleResetSalesFilters = () => {
+        setSalesMonth(currentMonth);
+        setSalesCustomer('');
+    };
+
+    const handleResetReceivablesFilters = () => {
+        setReceivablesMonth(currentMonth);
+        setReceivablesCustomer('');
+    };
+
+    const handleResetCategoryFilters = () => {
+        setCategoryReportStartDate(firstDay);
+        setCategoryReportEndDate(lastDay);
+    };
+
+    const handleResetLegacyFilters = () => {
+        setLegacyFilterCustomer('');
+        setLegacyFilterStartDate('');
+        setLegacyFilterEndDate('');
+    };
+
 
     useEffect(() => {
         if (years.length > 0 && !years.includes(selectedYear)) {
@@ -531,9 +617,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
     
     useEffect(() => {
         setCurrentPage(1);
-        setFilterCustomer('');
-        setIsCustomerReportFilterVisible(false);
-    }, [activeTab, filterStartDate, filterEndDate, selectedYear, sortConfig]);
+    }, [activeTab, selectedYear, sortConfig, salesMonth, salesCustomer, receivablesMonth, receivablesCustomer]);
     
     const requestSort = (key: string) => {
         let order: 'asc' | 'desc' = 'asc';
@@ -643,7 +727,17 @@ const Reports: React.FC<ReportsProps> = (props) => {
     // --- END P&L LOGIC ---
 
     const handleExport = () => {
-        const dateRange = { startDate: filterStartDate, endDate: filterEndDate };
+        let dateRange: { startDate: string, endDate: string };
+        if (activeTab === 'sales') {
+            const { startDate, endDate } = getSalesDateRange();
+            dateRange = { startDate, endDate };
+        } else if (activeTab === 'receivables') {
+            const { startDate, endDate } = getReceivablesDateRange();
+            dateRange = { startDate, endDate };
+        } else {
+            dateRange = { startDate: '', endDate: '' };
+        }
+        
         switch(activeTab) {
             case 'sales':
                 exportToExcel(
@@ -693,9 +787,13 @@ const Reports: React.FC<ReportsProps> = (props) => {
             activeTab === 'receivables' ? 'Laporan Piutang (Belum Lunas)' : 
             'Laporan Laba Rugi';
         
+        const { startDate: salesStartDate, endDate: salesEndDate } = getSalesDateRange();
+        const { startDate: receivablesStartDate, endDate: receivablesEndDate } = getReceivablesDateRange();
+        
         const period = activeTab === 'profitAndLoss' ? 
             (pnlFilterType === 'month' ? `Periode: ${new Date(pnlSelectedMonth + '-02').toLocaleString('id-ID', { month: 'long', year: 'numeric' })}` : `Periode: Tahun ${pnlSelectedYear}`)
-            : `Periode: ${new Date(filterStartDate).toLocaleDateString('id-ID')} - ${new Date(filterEndDate).toLocaleDateString('id-ID')}`;
+            : activeTab === 'sales' ? `Periode: ${new Date(salesStartDate).toLocaleDateString('id-ID')} - ${new Date(salesEndDate).toLocaleDateString('id-ID')}`
+            : `Periode: ${new Date(receivablesStartDate).toLocaleDateString('id-ID')} - ${new Date(receivablesEndDate).toLocaleDateString('id-ID')}`;
 
         const headerHtml = `
             <div class="header">
@@ -955,15 +1053,31 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
 
     // --- FILTERED DATA FOR OTHER TABS ---
+    const getSalesDateRange = useCallback(() => {
+        if (!salesMonth) return { startDate: '', endDate: '' };
+        const year = parseInt(salesMonth.slice(0, 4));
+        const month = parseInt(salesMonth.slice(5, 7));
+        const firstDay = new Date(year, month - 1, 1).toISOString().slice(0, 10);
+        const lastDay = new Date(year, month, 0).toISOString().slice(0, 10);
+        return { startDate: firstDay, endDate: lastDay };
+    }, [salesMonth]);
+
+    const filteredSalesCustomers = useMemo(() => {
+        if (!salesCustomer) return [];
+        const lowerCaseQuery = salesCustomer.toLowerCase();
+        return customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery));
+    }, [salesCustomer, customers]);
 
     const filteredSalesData = useMemo(() => {
+        const { startDate, endDate } = getSalesDateRange();
+        if (!startDate || !endDate) return [];
         return allOrders
             .filter(order => {
-                if (order.orderDate < filterStartDate || order.orderDate > filterEndDate) return false;
-                if (filterCustomer && order.customer !== filterCustomer) return false;
+                if (order.orderDate < startDate || order.orderDate > endDate) return false;
+                if (salesCustomer && !order.customer.toLowerCase().includes(salesCustomer.toLowerCase())) return false;
                 return true;
             });
-    }, [allOrders, filterStartDate, filterEndDate, filterCustomer]);
+    }, [allOrders, getSalesDateRange, salesCustomer]);
     
     const allDetailedSalesData = useMemo(() => {
         const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
@@ -1050,15 +1164,31 @@ const Reports: React.FC<ReportsProps> = (props) => {
         return sortedDetailedSalesData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     }, [sortedDetailedSalesData, currentPage]);
 
+    const getReceivablesDateRange = useCallback(() => {
+        if (!receivablesMonth) return { startDate: '', endDate: '' };
+        const year = parseInt(receivablesMonth.slice(0, 4));
+        const month = parseInt(receivablesMonth.slice(5, 7));
+        const firstDay = new Date(year, month - 1, 1).toISOString().slice(0, 10);
+        const lastDay = new Date(year, month, 0).toISOString().slice(0, 10);
+        return { startDate: firstDay, endDate: lastDay };
+    }, [receivablesMonth]);
+
+    const filteredReceivablesCustomers = useMemo(() => {
+        if (!receivablesCustomer) return [];
+        const lowerCaseQuery = receivablesCustomer.toLowerCase();
+        return customers.filter(c => c.name.toLowerCase().includes(lowerCaseQuery));
+    }, [receivablesCustomer, customers]);
 
     const filteredReceivablesData = useMemo(() => {
+        const { startDate, endDate } = getReceivablesDateRange();
+        if (!startDate || !endDate) return [];
+        
         const unpaidNewSystem = receivables
             .filter(r => {
                 const order = allOrders.find(o => o.id === r.id);
                 if (!order) return false; // Ensure order data exists
-                if (filterStartDate && order.orderDate < filterStartDate) return false;
-                if (filterEndDate && order.orderDate > filterEndDate) return false;
-                if (filterCustomer && r.customer !== filterCustomer) return false;
+                if (order.orderDate < startDate || order.orderDate > endDate) return false;
+                if (receivablesCustomer && !r.customer.toLowerCase().includes(receivablesCustomer.toLowerCase())) return false;
                 return r.paymentStatus === 'Belum Lunas';
             })
             .map(r => {
@@ -1069,9 +1199,8 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
         const unpaidLegacy = legacyReceivables
             .filter(r => {
-                if (filterStartDate && r.order_date < filterStartDate) return false;
-                if (filterEndDate && r.order_date > filterEndDate) return false;
-                if (filterCustomer && r.customer !== filterCustomer) return false;
+                if (r.order_date < startDate || r.order_date > endDate) return false;
+                if (receivablesCustomer && !r.customer.toLowerCase().includes(receivablesCustomer.toLowerCase())) return false;
                 return true;
             })
             .map(r => {
@@ -1092,7 +1221,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
         return [...unpaidNewSystem, ...unpaidLegacy]
             .filter(item => item.remaining > 0)
             .sort((a, b) => new Date(b.due).getTime() - new Date(a.due).getTime());
-    }, [receivables, legacyReceivables, allOrders, filterStartDate, filterEndDate, filterCustomer]);
+    }, [receivables, legacyReceivables, allOrders, getReceivablesDateRange, receivablesCustomer]);
     
     const paginatedReceivables = useMemo(() => {
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -1112,12 +1241,15 @@ const Reports: React.FC<ReportsProps> = (props) => {
     }, [filteredInventoryData, currentPage]);
 
     const handlePrintCustomerSpecificReport = (reportType: 'sales' | 'receivables') => {
-        if (!filterCustomer) {
-            alert("Silakan pilih pelanggan terlebih dahulu untuk mencetak laporan.");
+        const customerFilter = reportType === 'sales' ? salesCustomer : receivablesCustomer;
+        const { startDate, endDate } = reportType === 'sales' ? getSalesDateRange() : getReceivablesDateRange();
+        
+        if (!customerFilter) {
+            alert("Silakan ketik nama pelanggan di filter terlebih dahulu untuk mencetak laporan.");
             return;
         }
 
-        const reportPeriod = `Periode: ${filterStartDate ? new Date(filterStartDate).toLocaleDateString('id-ID') : '...'} - ${filterEndDate ? new Date(filterEndDate).toLocaleDateString('id-ID') : '...'}`;
+        const reportPeriod = `Periode: ${startDate ? new Date(startDate).toLocaleDateString('id-ID') : '...'} - ${endDate ? new Date(endDate).toLocaleDateString('id-ID') : '...'}`;
         let tableRows = '';
         let summaryHtml = '';
         let reportTitle = '';
@@ -1193,11 +1325,11 @@ const Reports: React.FC<ReportsProps> = (props) => {
         const printContent = `
             <html>
                 <head>
-                    <title>${reportTitle} - ${filterCustomer}</title>
+                    <title>${reportTitle} - ${customerFilter}</title>
                     <style>
                         body { font-family: Arial, sans-serif; font-size: 10pt; color: #333; }
                         .page { width: 190mm; min-height: 270mm; padding: 10mm; margin: 5mm auto; background: white; }
-                        .header, .customer-info, .summary { display: flex; justify-content: space-between; align-items: flex-start; }
+                        .header, .customer-info { display: flex; justify-content: space-between; align-items: flex-start; }
                         .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
                         hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
                         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
@@ -1220,7 +1352,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
                         </div>
                         <hr>
                         <div class="customer-info">
-                            <strong>${filterCustomer}</strong>
+                            <strong>${customerFilter}</strong>
                             <span>${reportPeriod}</span>
                         </div>
                         <hr>
@@ -1384,6 +1516,58 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
         return (
             <div className="space-y-6">
+                <div className="bg-gray-50 p-4 rounded-lg mb-6 border">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700">Bulan</label>
+                            <input type="month" value={salesMonth} onChange={e => setSalesMonth(e.target.value)} className="p-2 w-full mt-1 border rounded-md text-sm text-gray-500" />
+                        </div>
+                        <div className="md:col-span-1 relative">
+                            <label className="text-sm font-medium text-gray-700">Pelanggan (Opsional)</label>
+                            <input
+                                type="text"
+                                value={salesCustomer}
+                                onChange={e => {
+                                    setSalesCustomer(e.target.value);
+                                    setIsSalesCustomerDropdownOpen(true);
+                                }}
+                                onBlur={() => setTimeout(() => setIsSalesCustomerDropdownOpen(false), 150)}
+                                placeholder="Ketik untuk mencari nama pelanggan..."
+                                className="p-2 w-full mt-1 border rounded-md text-sm"
+                                autoComplete="off"
+                            />
+                            {isSalesCustomerDropdownOpen && filteredSalesCustomers.length > 0 && (
+                                <ul className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+                                    {filteredSalesCustomers.map(c => (
+                                        <li
+                                            key={c.id}
+                                            className="px-3 py-2 cursor-pointer hover:bg-pink-100"
+                                            onMouseDown={() => {
+                                                setSalesCustomer(c.name);
+                                                setIsSalesCustomerDropdownOpen(false);
+                                            }}
+                                        >
+                                            {c.name}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div>
+                            {salesCustomer ? (
+                                <button
+                                    onClick={() => handlePrintCustomerSpecificReport('sales')}
+                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 w-full"
+                                >
+                                    Cetak Laporan Pelanggan
+                                </button>
+                            ) : <div/>}
+                        </div>
+                    </div>
+                    <div className="flex justify-end items-center mt-3">
+                        <button onClick={handleResetSalesFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
+                    </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                      <ReportStatCard icon={<CurrencyDollarIcon />} title="Total Penjualan" value={formatCurrency(totalSales)} gradient="bg-gradient-to-br from-green-500 to-emerald-500" />
                      <ReportStatCard icon={<ShoppingCartIcon />} title="Jumlah Transaksi" value={totalTransactions.toString()} gradient="bg-gradient-to-br from-blue-500 to-sky-500" />
@@ -1450,6 +1634,58 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
         return (
             <div className="space-y-6">
+                <div className="bg-gray-50 p-4 rounded-lg mb-6 border">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                        <div>
+                            <label className="text-sm font-medium text-gray-700">Bulan</label>
+                            <input type="month" value={receivablesMonth} onChange={e => setReceivablesMonth(e.target.value)} className="p-2 w-full mt-1 border rounded-md text-sm text-gray-500" />
+                        </div>
+                        <div className="md:col-span-1 relative">
+                            <label className="text-sm font-medium text-gray-700">Pelanggan (Opsional)</label>
+                             <input 
+                                type="text" 
+                                value={receivablesCustomer} 
+                                onChange={e => {
+                                    setReceivablesCustomer(e.target.value);
+                                    setIsReceivablesCustomerDropdownOpen(true);
+                                }} 
+                                onBlur={() => setTimeout(() => setIsReceivablesCustomerDropdownOpen(false), 150)}
+                                placeholder="Ketik untuk mencari nama pelanggan..."
+                                className="p-2 w-full mt-1 border rounded-md text-sm"
+                                autoComplete="off"
+                            />
+                            {isReceivablesCustomerDropdownOpen && filteredReceivablesCustomers.length > 0 && (
+                                <ul className="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto mt-1">
+                                    {filteredReceivablesCustomers.map(c => (
+                                        <li
+                                            key={c.id}
+                                            className="px-3 py-2 cursor-pointer hover:bg-pink-100"
+                                            onMouseDown={() => {
+                                                setReceivablesCustomer(c.name);
+                                                setIsReceivablesCustomerDropdownOpen(false);
+                                            }}
+                                        >
+                                            {c.name}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <div>
+                            {receivablesCustomer ? (
+                                <button
+                                    onClick={() => handlePrintCustomerSpecificReport('receivables')}
+                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 w-full"
+                                >
+                                    Cetak Laporan Pelanggan
+                                </button>
+                            ) : <div/>}
+                        </div>
+                    </div>
+                     <div className="flex justify-end items-center mt-3">
+                        <button onClick={handleResetReceivablesFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
+                    </div>
+                </div>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                      <ReportStatCard icon={<ReceiptTaxIcon />} title="Total Sisa Tagihan" value={formatCurrency(totalRemaining)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
                      <ReportStatCard icon={<ExclamationTriangleIcon />} title="Jumlah Nota Belum Lunas" value={totalUnpaidNotes.toString()} gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500" />
@@ -1624,6 +1860,9 @@ const Reports: React.FC<ReportsProps> = (props) => {
                             <input type="date" value={legacyFilterStartDate} onChange={e => setLegacyFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
                             <input type="date" value={legacyFilterEndDate} onChange={e => setLegacyFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
                         </div>
+                         <div className="flex justify-end mt-3">
+                            <button onClick={handleResetLegacyFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
+                        </div>
                     </div>
                 )}
                  <div className="bg-amber-50 p-4 rounded-lg my-4 text-center">
@@ -1641,14 +1880,137 @@ const Reports: React.FC<ReportsProps> = (props) => {
         );
     };
     
+    // --- New Category Sales Report ---
+    const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
+        'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate'
+    };
+
+    const categorySalesData = useMemo(() => {
+        const categoryMap: Map<number, { name: string; totalItems: number; totalTurnover: number }> = new Map();
+
+        categories.forEach(cat => {
+            categoryMap.set(cat.id, { name: cat.name, totalItems: 0, totalTurnover: 0 });
+        });
+
+        const relevantOrders = allOrders.filter(order => order.orderDate >= categoryReportStartDate && order.orderDate <= categoryReportEndDate);
+
+        for (const order of relevantOrders) {
+            const customerData = customers.find(c => c.name === order.customer);
+            const customerLevel = customerData ? customerData.level : 'End Customer';
+            const priceKey = priceLevelMap[customerLevel];
+
+            for (const item of order.orderItems) {
+                if (!item.productId) continue;
+                
+                const productInfo = products.find(p => p.id === item.productId);
+                if (!productInfo) continue;
+
+                const categoryInfo = categories.find(c => c.name === productInfo.category);
+                if (!categoryInfo) continue;
+                
+                const finishingInfo = finishings.find(f => f.name === item.finishing);
+
+                const isAreaBased = categoryInfo.unitType === 'Per Luas';
+                let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
+                const finishingPrice = finishingInfo ? finishingInfo.price : 0;
+                let priceMultiplier = 1;
+
+                if (isAreaBased) {
+                    const length = parseFloat(item.length) || 0;
+                    const width = parseFloat(item.width) || 0;
+                    priceMultiplier = length * width;
+                }
+                
+                const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+                const itemFinishingTotal = finishingPrice * item.qty;
+                const itemTotalTurnover = itemMaterialTotal + itemFinishingTotal;
+
+                const currentCategoryData = categoryMap.get(categoryInfo.id)!;
+                currentCategoryData.totalItems += item.qty;
+                currentCategoryData.totalTurnover += itemTotalTurnover;
+            }
+        }
+        
+        return Array.from(categoryMap.values())
+            .filter(d => d.totalItems > 0)
+            .sort((a, b) => b.totalTurnover - a.totalTurnover);
+
+    }, [allOrders, products, categories, customers, finishings, categoryReportStartDate, categoryReportEndDate]);
+    
+    const renderCategorySalesReport = () => {
+        const totalTurnover = categorySalesData.reduce((sum, cat) => sum + cat.totalTurnover, 0);
+        const totalItemsSold = categorySalesData.reduce((sum, cat) => sum + cat.totalItems, 0);
+        const topCategory = categorySalesData[0] ? categorySalesData[0].name : 'N/A';
+        const PIE_COLORS = ['#ec4899', '#a855f7', '#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6', '#22c55e'];
+        
+        return (
+            <div className="space-y-6">
+                <div className="bg-gray-50 p-4 rounded-lg border">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                        <div><label className="text-sm font-medium text-gray-700">Tanggal Mulai</label><input type="date" value={categoryReportStartDate} onChange={e => setCategoryReportStartDate(e.target.value)} className="p-2 w-full border rounded-md text-sm text-gray-500 mt-1" /></div>
+                        <div><label className="text-sm font-medium text-gray-700">Tanggal Akhir</label><input type="date" value={categoryReportEndDate} onChange={e => setCategoryReportEndDate(e.target.value)} className="p-2 w-full border rounded-md text-sm text-gray-500 mt-1" /></div>
+                    </div>
+                     <div className="flex justify-end mt-3">
+                        <button onClick={handleResetCategoryFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <ReportStatCard icon={<CurrencyDollarIcon />} title="Total Omset" value={formatCurrency(totalTurnover)} gradient="bg-gradient-to-br from-green-500 to-emerald-500" />
+                    <ReportStatCard icon={<ShoppingCartIcon />} title="Total Item Terjual" value={totalItemsSold.toLocaleString('id-ID')} gradient="bg-gradient-to-br from-blue-500 to-sky-500" />
+                    <ReportStatCard icon={<ChartBarIcon />} title="Kategori Terlaris" value={topCategory} gradient="bg-gradient-to-br from-violet-500 to-purple-500" />
+                </div>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div className="h-96">
+                        <h4 className="font-semibold mb-2">Distribusi Omset per Kategori</h4>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie data={categorySalesData} dataKey="totalTurnover" nameKey="name" cx="50%" cy="50%" outerRadius={120} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}>
+                                    {categorySalesData.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
+                                </Pie>
+                                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                                <Legend />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                    <div>
+                        <h4 className="font-semibold mb-2">Rincian per Kategori</h4>
+                        <div className="overflow-auto border rounded-lg max-h-96">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th className="py-2 px-3 text-left">Nama Kategori</th>
+                                        <th className="py-2 px-3 text-right">Jumlah Item</th>
+                                        <th className="py-2 px-3 text-right">Total Omset</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                    {categorySalesData.map(cat => (
+                                        <tr key={cat.name}>
+                                            <td className="py-2 px-3 font-medium">{cat.name}</td>
+                                            <td className="py-2 px-3 text-right">{cat.totalItems.toLocaleString('id-ID')}</td>
+                                            <td className="py-2 px-3 text-right font-semibold">{formatCurrency(cat.totalTurnover)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderContent = () => {
         switch (activeTab) {
             case 'finalRecap': return renderFinalRecap();
             case 'profitAndLoss': return renderProfitAndLoss();
             case 'sales': return renderSales();
+            case 'categorySales': return renderCategorySalesReport();
             case 'receivables': return renderReceivables();
             case 'inventory': return renderInventory();
-            case 'assetsDebts': return <AssetsAndDebts assets={assets} debts={debts} onAddAsset={onAddAsset} onAddDebt={onAddDebt} />;
+            case 'assetsDebts': return <AssetsAndDebts assets={assets} debts={debts} onAddAsset={onAddAsset} onUpdateAsset={onUpdateAsset} onDeleteAsset={onDeleteAsset} onAddDebt={onAddDebt} onUpdateDebt={onUpdateDebt} onDeleteDebt={onDeleteDebt} />;
             case 'dataPenjualanLama': return renderDataPenjualanLama();
             case 'dataPiutangLama': return renderDataPiutangLama();
             default:
@@ -1680,38 +2042,8 @@ const Reports: React.FC<ReportsProps> = (props) => {
                                 </button>
                             </div>
                         )}
-                        {['sales', 'receivables'].includes(activeTab) && (
-                             <button 
-                                onClick={() => setIsCustomerReportFilterVisible(!isCustomerReportFilterVisible)}
-                                className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"
-                            >
-                                <FilterIcon className="h-4 w-4" />
-                                <span>Filter Laporan</span>
-                            </button>
-                        )}
                     </div>
                 </div>
-
-                 {isCustomerReportFilterVisible && (
-                    <div className="bg-gray-50 p-4 rounded-lg mb-4 border">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                            <select value={filterCustomer} onChange={e => setFilterCustomer(e.target.value)} className="p-2 border rounded-md bg-white text-sm">
-                                <option value="">Pilih Pelanggan</option>
-                                {uniqueCustomers.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                            <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
-                            <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
-                            {filterCustomer && (
-                                <button
-                                    onClick={() => handlePrintCustomerSpecificReport(activeTab as 'sales' | 'receivables')}
-                                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 w-full"
-                                >
-                                    Cetak Laporan Pelanggan
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                )}
                 
                 <div className="border-b border-gray-200">
                     <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
@@ -1719,7 +2051,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
                             <button
                                 key={tab.key}
                                 onClick={() => setActiveTab(tab.key)}
-                                className={`${ activeTab === tab.key ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+                                className={`${ activeTab.startsWith(tab.key) ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
                             >
                                 {tab.label}
                             </button>
