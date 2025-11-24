@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
@@ -552,6 +553,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
     const [sortConfig, setSortConfig] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'noNota', order: 'desc' });
     
     const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const { firstDay, lastDay } = getMonthDateRange();
     
     // States for sales report
     const [salesMonth, setSalesMonth] = useState(currentMonth);
@@ -560,11 +562,14 @@ const Reports: React.FC<ReportsProps> = (props) => {
 
 
     // States for receivables report
+    const [receivablesFilterType, setReceivablesFilterType] = useState<'date' | 'month' | 'year'>('month');
+    const [receivablesStartDate, setReceivablesStartDate] = useState(firstDay);
+    const [receivablesEndDate, setReceivablesEndDate] = useState(lastDay);
     const [receivablesMonth, setReceivablesMonth] = useState(currentMonth);
+    const [receivablesYear, setReceivablesYear] = useState(new Date().getFullYear());
     const [receivablesCustomer, setReceivablesCustomer] = useState('');
     const [isReceivablesCustomerDropdownOpen, setIsReceivablesCustomerDropdownOpen] = useState(false);
     
-    const { firstDay, lastDay } = getMonthDateRange();
     const [categoryReportStartDate, setCategoryReportStartDate] = useState(firstDay);
     const [categoryReportEndDate, setCategoryReportEndDate] = useState(lastDay);
 
@@ -587,7 +592,11 @@ const Reports: React.FC<ReportsProps> = (props) => {
     };
 
     const handleResetReceivablesFilters = () => {
+        setReceivablesFilterType('month');
         setReceivablesMonth(currentMonth);
+        setReceivablesStartDate(firstDay);
+        setReceivablesEndDate(lastDay);
+        setReceivablesYear(new Date().getFullYear());
         setReceivablesCustomer('');
     };
 
@@ -617,7 +626,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
     
     useEffect(() => {
         setCurrentPage(1);
-    }, [activeTab, selectedYear, sortConfig, salesMonth, salesCustomer, receivablesMonth, receivablesCustomer]);
+    }, [activeTab, selectedYear, sortConfig, salesMonth, salesCustomer, receivablesMonth, receivablesCustomer, receivablesFilterType, receivablesStartDate, receivablesEndDate, receivablesYear]);
     
     const requestSort = (key: string) => {
         let order: 'asc' | 'desc' = 'asc';
@@ -698,15 +707,15 @@ const Reports: React.FC<ReportsProps> = (props) => {
     const pnlChartData = useMemo(() => {
         if (pnlFilterType === 'month') {
             const daysInMonth = new Date(parseInt(pnlSelectedMonth.slice(0, 4)), parseInt(pnlSelectedMonth.slice(5, 7)), 0).getDate();
-            const dailyData = Array.from({ length: daysInMonth }, (_, i) => ({ name: `${i + 1}`, Pendapatan: 0, Pengeluaran: 0 }));
+            const dailyData: { name: string; Pendapatan: number; Pengeluaran: number }[] = Array.from({ length: daysInMonth }, (_, i) => ({ name: `${i + 1}`, Pendapatan: 0, Pengeluaran: 0 }));
             
             // Pendapatan
             pnlFilteredReceivables.forEach(r => r.payments?.forEach(p => { if (p.date >= pnlStartDate && p.date <= pnlEndDate) { const day = new Date(p.date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pendapatan += p.amount; }}));
-            pnlFilteredLegacyIncomes.forEach(i => { const day = new Date(i.month_date).getUTCDate() -1; if(dailyData[day]) dailyData[day].Pendapatan += i.amount; });
+            pnlFilteredLegacyIncomes.forEach(i => { const day = new Date(i.month_date).getUTCDate() -1; if(dailyData[day]) dailyData[day].Pendapatan += Number(i.amount); });
             
             // Pengeluaran
             pnlFilteredExpenses.forEach(e => { const day = new Date(e.date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pengeluaran += e.amount; });
-            pnlFilteredLegacyExpenses.forEach(e => { const day = new Date(e.month_date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pengeluaran += e.amount; });
+            pnlFilteredLegacyExpenses.forEach(e => { const day = new Date(e.month_date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pengeluaran += Number(e.amount); });
 
             return dailyData;
         } else {
@@ -714,11 +723,11 @@ const Reports: React.FC<ReportsProps> = (props) => {
             
             // Pendapatan
             pnlFilteredReceivables.forEach(r => r.payments?.forEach(p => { if (p.date >= pnlStartDate && p.date <= pnlEndDate) { const month = new Date(p.date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pendapatan += p.amount; }}));
-            pnlFilteredLegacyIncomes.forEach(i => { const month = new Date(i.month_date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pendapatan += i.amount; });
+            pnlFilteredLegacyIncomes.forEach(i => { const month = new Date(i.month_date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pendapatan += Number(i.amount); });
 
             // Pengeluaran
             pnlFilteredExpenses.forEach(e => { const month = new Date(e.date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pengeluaran += e.amount; });
-            pnlFilteredLegacyExpenses.forEach(e => { const month = new Date(e.month_date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pengeluaran += e.amount; });
+            pnlFilteredLegacyExpenses.forEach(e => { const month = new Date(e.month_date).getUTCMonth(); if (monthlyData[month]) monthlyData[month].Pengeluaran += Number(e.amount); });
 
             return monthlyData;
         }
@@ -1165,13 +1174,21 @@ const Reports: React.FC<ReportsProps> = (props) => {
     }, [sortedDetailedSalesData, currentPage]);
 
     const getReceivablesDateRange = useCallback(() => {
+        if (receivablesFilterType === 'date') {
+            return { startDate: receivablesStartDate, endDate: receivablesEndDate };
+        }
+        if (receivablesFilterType === 'year') {
+            return { startDate: `${receivablesYear}-01-01`, endDate: `${receivablesYear}-12-31` };
+        }
+        
+        // Default is 'month'
         if (!receivablesMonth) return { startDate: '', endDate: '' };
         const year = parseInt(receivablesMonth.slice(0, 4));
         const month = parseInt(receivablesMonth.slice(5, 7));
-        const firstDay = new Date(year, month - 1, 1).toISOString().slice(0, 10);
-        const lastDay = new Date(year, month, 0).toISOString().slice(0, 10);
-        return { startDate: firstDay, endDate: lastDay };
-    }, [receivablesMonth]);
+        const first = new Date(year, month - 1, 1).toISOString().slice(0, 10);
+        const last = new Date(year, month, 0).toISOString().slice(0, 10);
+        return { startDate: first, endDate: last };
+    }, [receivablesFilterType, receivablesMonth, receivablesStartDate, receivablesEndDate, receivablesYear]);
 
     const filteredReceivablesCustomers = useMemo(() => {
         if (!receivablesCustomer) return [];
@@ -1228,6 +1245,17 @@ const Reports: React.FC<ReportsProps> = (props) => {
         return filteredReceivablesData.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     }, [filteredReceivablesData, currentPage]);
     
+    const globalActiveReceivables = useMemo(() => {
+        const newSystem = receivables.reduce((sum, r) => {
+            if (r.paymentStatus === 'Lunas') return sum;
+            const paid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
+            const remaining = r.amount - (r.discount || 0) - paid;
+            return sum + (remaining > 0 ? remaining : 0);
+        }, 0);
+        const legacySystem = legacyReceivables.reduce((sum, r) => sum + r.amount, 0);
+        return newSystem + legacySystem;
+    }, [receivables, legacyReceivables]);
+
     const filteredInventoryData = useMemo(() => {
         return inventory.map(item => ({
             ...item,
@@ -1637,9 +1665,47 @@ const Reports: React.FC<ReportsProps> = (props) => {
                 <div className="bg-gray-50 p-4 rounded-lg mb-6 border">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                         <div>
-                            <label className="text-sm font-medium text-gray-700">Bulan</label>
-                            <input type="month" value={receivablesMonth} onChange={e => setReceivablesMonth(e.target.value)} className="p-2 w-full mt-1 border rounded-md text-sm text-gray-500" />
+                            <label className="text-sm font-medium text-gray-700">Tipe Filter</label>
+                            <select 
+                                value={receivablesFilterType} 
+                                onChange={e => setReceivablesFilterType(e.target.value as any)} 
+                                className="p-2 w-full mt-1 border rounded-md text-sm bg-white"
+                            >
+                                <option value="month">Per Bulan</option>
+                                <option value="date">Per Tanggal</option>
+                                <option value="year">Per Tahun</option>
+                            </select>
                         </div>
+                        
+                        {receivablesFilterType === 'date' ? (
+                            <div className="col-span-2 grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Dari Tanggal</label>
+                                    <input type="date" value={receivablesStartDate} onChange={e => setReceivablesStartDate(e.target.value)} className="p-2 w-full mt-1 border rounded-md text-sm" />
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-gray-700">Sampai Tanggal</label>
+                                    <input type="date" value={receivablesEndDate} onChange={e => setReceivablesEndDate(e.target.value)} className="p-2 w-full mt-1 border rounded-md text-sm" />
+                                </div>
+                            </div>
+                        ) : receivablesFilterType === 'year' ? (
+                            <div>
+                                <label className="text-sm font-medium text-gray-700">Tahun</label>
+                                <select 
+                                    value={receivablesYear} 
+                                    onChange={e => setReceivablesYear(Number(e.target.value))}
+                                    className="p-2 w-full mt-1 border rounded-md bg-white text-sm"
+                                >
+                                    {years.map(year => <option key={year} value={year}>{year}</option>)}
+                                </select>
+                            </div>
+                        ) : (
+                            <div>
+                                <label className="text-sm font-medium text-gray-700">Bulan</label>
+                                <input type="month" value={receivablesMonth} onChange={e => setReceivablesMonth(e.target.value)} className="p-2 w-full mt-1 border rounded-md text-sm text-gray-500" />
+                            </div>
+                        )}
+
                         <div className="md:col-span-1 relative">
                             <label className="text-sm font-medium text-gray-700">Pelanggan (Opsional)</label>
                              <input 
@@ -1686,8 +1752,9 @@ const Reports: React.FC<ReportsProps> = (props) => {
                         <button onClick={handleResetReceivablesFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
                     </div>
                 </div>
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     <ReportStatCard icon={<ReceiptTaxIcon />} title="Total Sisa Tagihan" value={formatCurrency(totalRemaining)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
+                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <ReportStatCard icon={<UsersIcon />} title="Total Piutang Aktif (Global)" value={formatCurrency(globalActiveReceivables)} gradient="bg-gradient-to-br from-indigo-500 to-blue-500" />
+                     <ReportStatCard icon={<ReceiptTaxIcon />} title="Total Sisa Tagihan (Filter)" value={formatCurrency(totalRemaining)} gradient="bg-gradient-to-br from-rose-500 to-red-500" />
                      <ReportStatCard icon={<ExclamationTriangleIcon />} title="Jumlah Nota Belum Lunas" value={totalUnpaidNotes.toString()} gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500" />
                  </div>
                  <div>

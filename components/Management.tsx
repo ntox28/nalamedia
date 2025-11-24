@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CustomerData, type CategoryData, type InventoryItem, type SupplierData, type ExpenseItem, type EmployeeData, type SalaryData } from '../types';
 import { PencilIcon, TrashIcon, PlusCircleIcon, MagnifyingGlassIcon } from './Icons';
@@ -108,7 +109,7 @@ const EditFinishingModal: React.FC<{ finishing: FinishingData; categories: Categ
         setFormData(prev => ({ ...prev, [name]: name === 'price' ? Number(value) : value }));
     };
     const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const selectedIds = Array.from(e.target.selectedOptions, option => Number(option.value));
+        const selectedIds = Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => Number(option.value));
         setFormData(prev => ({ ...prev, categoryIds: selectedIds }));
     };
     const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onSave(formData); };

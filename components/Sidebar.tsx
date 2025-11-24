@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { MENU_ITEMS, SETTINGS_MENU_ITEM } from '../constants';
 import { type MenuKey, type Profile, type MenuPermissions } from '../types';
@@ -25,9 +26,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeMenu, onMenuClick, isOpen, curr
 
 
   // Reusable Link Component
-  const SidebarLink = ({ item }: { item: typeof MENU_ITEMS[0] }) => (
+  const SidebarLink: React.FC<{ item: typeof MENU_ITEMS[0] }> = ({ item }) => (
     <a
-      key={item.key}
       href="#"
       onClick={(e) => {
         e.preventDefault();
