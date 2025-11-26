@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem, type LegacyReceivable } from '../types';
 import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon } from './Icons';
@@ -536,7 +537,7 @@ const SummaryInfoModal: React.FC<{
         return (
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left">Pelanggan</th><th className="py-2 px-3 text-left">No Nota</th><th className="py-2 px-3 text-left">Status Produksi</th><th className="py-2 px-3 text-right">Sisa Tagihan</th></tr></thead>
-            <tbody className="divide-y">{data.receivables?.map(r => (<tr key={r.id}><td className="py-2 px-3">{r.customer}</td><td className="py-2 px-3">{r.id}</td><td className="py-2 px-3">{r.productionStatus}</td><td className="py-2 px-3 text-right">{formatCurrency(r.remaining)}</td></tr>))}</tbody>
+            <tbody className="divide-y">{data.receivables?.map(r => (<tr key={r.id}><td className="py-2 px-3">{r.customer}</td><td className="py-2 px-3">{r.id}</td><td className="py-2 px-3">{r.productionStatus}</td><td className="py-2 px-3 text-right">{formatCurrency(Number(r.remaining))}</td></tr>))}</tbody>
           </table>
         );
       case 'expenses':
@@ -558,7 +559,7 @@ const SummaryInfoModal: React.FC<{
               {data.finalCashBreakdown && Object.entries(data.finalCashBreakdown).map(([method, amount]) => (
                 <div key={method} className="flex justify-between text-sm p-2 bg-gray-50 rounded-md">
                   <span className="text-gray-600">{method}</span>
-                  <span className="font-medium">{formatCurrency(amount)}</span>
+                  <span className="font-medium">{formatCurrency(amount as number)}</span>
                 </div>
               ))}
             </div>
@@ -1813,40 +1814,126 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const reportTitle = 'Laporan Piutang Pelanggan';
         const reportItems = filteredItems.filter(r => r.customer === filterCustomer);
 
-        const tableHeaders = `
-            <tr>
-                <th>No. Nota</th>
-                <th>Deskripsi Item</th>
-                <th>Qty</th>
-                <th class="currency">Total Tagihan</th>
-                <th class="currency">Dibayar</th>
-                <th class="currency">Sisa</th>
-                <th>Tanggal Jatuh Tempo</th>
-            </tr>`;
+        const calculateItemPrice = (item: OrderItemData, customerName: string): number => {
+            if (item.customPrice !== undefined && item.customPrice !== null) {
+                return item.customPrice;
+            }
+
+            const customerData = customers.find(c => c.name === customerName);
+            const customerLevel = customerData ? customerData.level : 'End Customer';
+            const priceKey = priceLevelMap[customerLevel];
             
-        const tableRows = reportItems.flatMap(receivable => {
+            if (!item.productId) return 0;
+            const productInfo = products.find(p => p.id === item.productId);
+            const finishingInfo = finishings.find(f => f.name === item.finishing);
+            if (!productInfo) return 0;
+
+            const categoryInfo = categories.find(c => c.name === productInfo.category);
+            const isAreaBased = categoryInfo?.unitType === 'Per Luas';
+
+            let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
+            const finishingPrice = finishingInfo ? finishingInfo.price : 0;
+            let priceMultiplier = 1;
+            
+            if (isAreaBased) {
+                const length = parseFloat(item.length) || 0;
+                const width = parseFloat(item.width) || 0;
+                priceMultiplier = length * width;
+            }
+            
+            const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
+            const itemFinishingTotal = finishingPrice * item.qty;
+            return itemMaterialTotal + itemFinishingTotal;
+        };
+
+        const invoiceBlocks = reportItems.map(receivable => {
             const fullOrder = allOrders.find(o => o.id === receivable.id);
-            if (!fullOrder) return [];
-    
+            const orderDate = fullOrder ? fullOrder.orderDate : (receivable.isLegacy ? receivable.legacyData?.order_date : new Date().toISOString());
+            const displayId = receivable.type === 'legacy' ? receivable.nota_id : receivable.id;
+            
             const paid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
             const remaining = receivable.amount - (receivable.discount || 0) - paid;
 
-            return fullOrder.orderItems.map((item, index) => {
-                const product = products.find(p => p.id === item.productId);
-                const isFirstItem = index === 0;
-    
-                return `
+            const invoiceHeader = `
+                <div style="margin-top: 20px; margin-bottom: 5px; font-weight: bold; font-size: 11pt; border-bottom: 1px dashed #ccc; padding-bottom: 4px;">
+                    No. Nota : ${displayId} <span style="font-weight: normal; margin-left: 10px;">(Tanggal Order : ${formatDate(orderDate as string)})</span>
+                </div>`;
+
+            let itemRows = '';
+            
+            if (fullOrder) {
+                const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, receivable.customer), 0);
+                const roundingDifference = receivable.amount - unroundedTotal;
+
+                itemRows = fullOrder.orderItems.map((item, index) => {
+                    const product = products.find(p => p.id === item.productId);
+                    const category = categories.find(c => c.name === product?.category);
+                    const isArea = category?.unitType === 'Per Luas';
+                    
+                    let itemTotal = calculateItemPrice(item, receivable.customer);
+                    const isLastItem = index === fullOrder.orderItems.length - 1;
+                    if (isLastItem) {
+                        itemTotal += roundingDifference;
+                    }
+
+                    const sizeStr = isArea ? `${item.length}m x ${item.width}m` : '';
+                    const finishStr = item.finishing && item.finishing !== 'Tanpa Finishing' ? item.finishing : '';
+                    const separator = sizeStr && finishStr ? ' | ' : '';
+                    const detailsString = [sizeStr, finishStr].filter(Boolean).join(' | ');
+                    
+                    const isFirstItem = index === 0;
+                    const rowSpan = fullOrder.orderItems.length;
+
+                    return `
+                        <tr>
+                            <td style="vertical-align: top; padding: 5px;">
+                                <div style="font-weight: bold;">${item.description || ''}</div>
+                                <div style="font-size: 9pt; color: #555;">${product?.name || 'Item'}</div>
+                                <div style="font-size: 9pt; color: #555;">${detailsString || 'Polos'}</div>
+                            </td>
+                            <td style="text-align:center; vertical-align: top; padding: 5px;">${item.qty}</td>
+                            <td class="currency" style="vertical-align: top; padding: 5px;">${formatCurrency(itemTotal)}</td>
+                            ${isFirstItem ? `<td class="currency" rowspan="${rowSpan}" style="vertical-align: top; padding: 5px; font-weight: bold; border-left: 1px solid #eee;">${formatCurrency(receivable.amount)}</td>` : ''}
+                            ${isFirstItem ? `<td class="currency" rowspan="${rowSpan}" style="vertical-align: top; padding: 5px; font-weight: bold; color: #d32f2f; border-left: 1px solid #eee;">${formatCurrency(remaining)}</td>` : ''}
+                        </tr>
+                    `;
+                }).join('');
+            } else if (receivable.isLegacy && receivable.legacyData) {
+                 const item = receivable.legacyData;
+                 const sizeStr = (item.length && item.width) ? `${item.length}m x ${item.width}m` : '';
+                 
+                 itemRows = `
                     <tr>
-                        ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${receivable.id}</td>` : ''}
-                        <td>${item.description || product?.name || 'N/A'}</td>
-                        <td>${item.qty} Pcs</td>
-                        ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(receivable.amount)}</td>` : ''}
-                        ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(paid)}</td>` : ''}
-                        ${isFirstItem ? `<td class="currency" rowSpan="${fullOrder.orderItems.length}">${formatCurrency(remaining)}</td>` : ''}
-                        ${isFirstItem ? `<td rowSpan="${fullOrder.orderItems.length}">${formatDate(receivable.due)}</td>` : ''}
+                        <td style="vertical-align: top; padding: 5px;">
+                            <div style="font-weight: bold;">${item.description}</div>
+                            <div style="font-size: 9pt; color: #555;">Data Lama</div>
+                            <div style="font-size: 9pt; color: #555;">${sizeStr}</div>
+                        </td>
+                        <td style="text-align:center; vertical-align: top; padding: 5px;">${item.qty}</td>
+                        <td class="currency" style="vertical-align: top; padding: 5px;">${formatCurrency(item.amount)}</td>
+                        <td class="currency" style="vertical-align: top; padding: 5px; font-weight: bold; border-left: 1px solid #eee;">${formatCurrency(item.amount)}</td>
+                        <td class="currency" style="vertical-align: top; padding: 5px; font-weight: bold; color: #d32f2f; border-left: 1px solid #eee;">${formatCurrency(remaining)}</td>
                     </tr>
-                `;
-            }).join('');
+                 `;
+            }
+
+            return `
+                <div style="margin-bottom: 15px; page-break-inside: avoid;">
+                    ${invoiceHeader}
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 5px; border: 1px solid #ddd;">
+                        <thead>
+                            <tr style="background-color: #f2f2f2; border-bottom: 1px solid #aaa;">
+                                <th style="text-align: left; padding: 6px;">Deskripsi item</th>
+                                <th style="text-align: center; width: 50px; padding: 6px;">Qty</th>
+                                <th class="currency" style="width: 100px; padding: 6px;">Total/Item</th>
+                                <th class="currency" style="width: 100px; padding: 6px;">Tagihan</th>
+                                <th class="currency" style="width: 100px; padding: 6px;">Sisa</th>
+                            </tr>
+                        </thead>
+                        <tbody>${itemRows}</tbody>
+                    </table>
+                </div>
+            `;
         }).join('');
 
         const totalSisa = reportItems.reduce((sum, r) => {
@@ -1857,8 +1944,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
         const summaryHtml = `
             <div class="summary-box">
-                <table style="width: 250px; float: right; border: none;">
-                    <tr><td style="border:none;">Total Sisa Tagihan:</td><td style="border:none;" class="currency"><strong>${formatCurrency(totalSisa)}</strong></td></tr>
+                <table style="width: 300px; float: right; border: none;">
+                    <tr><td style="border:none; font-size: 12pt;">Total Sisa Tagihan:</td><td style="border:none; font-size: 12pt;" class="currency"><strong>${formatCurrency(totalSisa)}</strong></td></tr>
                 </table>
             </div>`;
 
@@ -1867,17 +1954,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 <head>
                     <title>${reportTitle} - ${filterCustomer}</title>
                     <style>
-                        body { font-family: Arial, sans-serif; font-size: 10pt; color: #333; }
+                        body { font-family: Arial, sans-serif; font-size: 9pt; color: #333; }
                         .page { width: 190mm; min-height: 270mm; padding: 10mm; margin: 5mm auto; background: white; }
                         .header, .customer-info, .summary { display: flex; justify-content: space-between; align-items: flex-start; }
                         .header h1 { font-size: 16pt; margin: 0; } .header h2 { font-size: 12pt; margin: 0; color: #555; }
                         hr { border: 0; border-top: 1px solid #ccc; margin: 8px 0; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                        th, td { border: 1px solid #ddd; padding: 6px; text-align: left; font-size: 9pt; vertical-align: top; }
-                        th { background-color: #f2f2f2; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { padding: 4px; text-align: left; vertical-align: top; border-bottom: 1px solid #eee; }
                         .currency { text-align: right; }
-                        .summary-box { text-align: right; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc; }
-                        @media print { .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-after: always; } }
+                        .summary-box { text-align: right; margin-top: 20px; padding-top: 10px; border-top: 2px solid #333; clear: both; }
+                        small { color: #555; font-size: 8pt; }
+                        @media print { .page { margin: 0; border: initial; border-radius: initial; width: initial; min-height: initial; box-shadow: initial; background: initial; page-break-inside: avoid; } }
                     </style>
                 </head>
                 <body>
@@ -1896,13 +1983,11 @@ const Receivables: React.FC<ReceivablesProps> = ({
                             <span>${reportPeriod}</span>
                         </div>
                         <hr>
-                        <table>
-                            <thead>
-                               ${tableHeaders}
-                            </thead>
-                            <tbody>${tableRows}</tbody>
-                        </table>
+                        
+                        ${invoiceBlocks}
+
                         ${summaryHtml}
+                        
                         <div style="clear: both; margin-top: 40px; font-size: 9pt;">
                             <hr>
                             <strong>Informasi Pembayaran:</strong><br>
