@@ -378,8 +378,44 @@ const Sales: React.FC<SalesProps> = ({
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotaSettingsOpen, setIsNotaSettingsOpen] = useState(false);
-  const [mode, setMode] = useState<'order' | 'simulation' | 'legacy'>('order');
+  const [mode, setMode] = useState<'order' | 'simulation' | 'legacy' | 'prompt'>('order');
   const [simulationResult, setSimulationResult] = useState<SavedOrder | null>(null);
+
+  // State for prompt generator
+  const [promptData, setPromptData] = useState({
+    mainTitle: '',
+    tagline: '',
+    additionalDetail: '',
+    cta: '',
+    businessType: '',
+    dominantColor: '',
+    backgroundDetail: '',
+    dimensions: '',
+    mediaType: '',
+    designStyle: ''
+  });
+  const [generatedPrompt, setGeneratedPrompt] = useState('');
+
+  const handleGeneratePrompt = () => {
+    const prompt = `Create a professional ${promptData.mediaType || 'advertising'} design for ${promptData.businessType || 'a business'}. 
+Main Title: "${promptData.mainTitle}"
+Tagline: "${promptData.tagline}"
+Content Details: ${promptData.additionalDetail}
+Call to Action: ${promptData.cta}
+Dominant Colors: ${promptData.dominantColor}
+Background Details: ${promptData.backgroundDetail}
+Design Style: ${promptData.designStyle}
+Size/Dimensions: ${promptData.dimensions} mm.
+The layout should be eye-catching, clear, and specifically tailored for ${promptData.mediaType || 'outdoor advertising'}.`;
+    
+    setGeneratedPrompt(prompt);
+  };
+
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(generatedPrompt)
+      .then(() => alert('Prompt berhasil disalin!'))
+      .catch(() => alert('Gagal menyalin prompt.'));
+  };
 
   // State for customer combobox
   const [customerInputValue, setCustomerInputValue] = useState('');
@@ -870,6 +906,7 @@ const Sales: React.FC<SalesProps> = ({
   const formTitle = 
     mode === 'simulation' ? 'Simulasi Harga Cetak' :
     mode === 'legacy' ? 'Masukan Piutang Lama' :
+    mode === 'prompt' ? 'AI Prompt Generator Desain' :
     editingOrderId ? `Edit Order ${editingOrderId}` : 'Tambah Order Baru';
 
   return (
@@ -961,20 +998,143 @@ const Sales: React.FC<SalesProps> = ({
             {mode === 'order' && <button onClick={handleNewOrder} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-300">Buat Baru</button>}
           </div>
           
-           <div className="flex mb-6 border border-gray-200 rounded-lg p-1 bg-gray-100 max-w-md">
-              <button type="button" onClick={() => handleModeChange('order')} className={`w-1/3 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'order' ? 'bg-white text-pink-600 shadow' : 'text-gray-600'}`}>
+           <div className="flex mb-6 border border-gray-200 rounded-lg p-1 bg-gray-100 max-w-2xl">
+              <button type="button" onClick={() => handleModeChange('order')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'order' ? 'bg-white text-pink-600 shadow' : 'text-gray-600'}`}>
                   Buat Order
               </button>
-              <button type="button" onClick={() => handleModeChange('simulation')} className={`w-1/3 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'simulation' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+              <button type="button" onClick={() => handleModeChange('simulation')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'simulation' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
                   Simulasi Harga
               </button>
               {canAccessLegacyInput && (
-                 <button type="button" onClick={() => handleModeChange('legacy')} className={`w-1/3 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'legacy' ? 'bg-white text-amber-600 shadow' : 'text-gray-600'}`}>
+                 <button type="button" onClick={() => handleModeChange('legacy')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'legacy' ? 'bg-white text-amber-600 shadow' : 'text-gray-600'}`}>
                     Piutang Lama
                 </button>
               )}
+              <button type="button" onClick={() => handleModeChange('prompt')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'prompt' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>
+                  Prompt Generator
+              </button>
           </div>
 
+          {mode === 'prompt' ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium">Judul Utama</label>
+                  <input 
+                    type="text" 
+                    value={promptData.mainTitle} 
+                    onChange={(e) => setPromptData({...promptData, mainTitle: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., ES TEH JUMBO SEGAR"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Sub Judul / Tagline</label>
+                  <input 
+                    type="text" 
+                    value={promptData.tagline} 
+                    onChange={(e) => setPromptData({...promptData, tagline: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., Manisnya Pas, Segarnya Bikin Nagih"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium">Detail Tambahan (Text)</label>
+                  <textarea 
+                    value={promptData.additionalDetail} 
+                    onChange={(e) => setPromptData({...promptData, additionalDetail: e.target.value})} 
+                    rows={2} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., Original / Lemon / Lychee / Jumbo Cup / Harga Mulai 3rb"
+                  ></textarea>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Call to Action</label>
+                  <input 
+                    type="text" 
+                    value={promptData.cta} 
+                    onChange={(e) => setPromptData({...promptData, cta: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., Buruan Coba Sekarang!"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Jenis Usaha</label>
+                  <input 
+                    type="text" 
+                    value={promptData.businessType} 
+                    onChange={(e) => setPromptData({...promptData, businessType: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., Minuman UMKM"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Warna Dominan</label>
+                  <input 
+                    type="text" 
+                    value={promptData.dominantColor} 
+                    onChange={(e) => setPromptData({...promptData, dominantColor: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., Hijau daun + kuning lemon + putih"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Background Detail</label>
+                  <input 
+                    type="text" 
+                    value={promptData.backgroundDetail} 
+                    onChange={(e) => setPromptData({...promptData, backgroundDetail: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., splash teh, es batu crystal, lemon slice"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Dimensi / Ukuran (mm)</label>
+                  <input 
+                    type="text" 
+                    value={promptData.dimensions} 
+                    onChange={(e) => setPromptData({...promptData, dimensions: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., 2000 x 1000"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Tipe Media</label>
+                  <select 
+                    value={promptData.mediaType} 
+                    onChange={(e) => setPromptData({...promptData, mediaType: e.target.value})} 
+                    className="mt-1 w-full p-2 border bg-white rounded-md"
+                  >
+                    <option value="">Pilih Tipe</option>
+                    <option value="Spanduk">Spanduk</option>
+                    <option value="Banner">Banner</option>
+                    <option value="Poster">Poster</option>
+                    <option value="X-Banner">X-Banner</option>
+                    <option value="Baliho">Baliho</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium">Gaya Desain / Style</label>
+                  <input 
+                    type="text" 
+                    value={promptData.designStyle} 
+                    onChange={(e) => setPromptData({...promptData, designStyle: e.target.value})} 
+                    className="mt-1 w-full p-2 border rounded-md" 
+                    placeholder="e.g., modern premium street beverage advertising"
+                  />
+                </div>
+              </div>
+              <div className="border-t pt-6 text-right">
+                <button 
+                  type="button" 
+                  onClick={handleGeneratePrompt}
+                  className="bg-purple-600 hover:bg-purple-700 text-white py-3 px-8 rounded-lg font-bold transition-colors"
+                >
+                  Generate Prompt
+                </button>
+              </div>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -1090,6 +1250,7 @@ const Sales: React.FC<SalesProps> = ({
               </button>
             </div>
           </form>
+          )}
         </div>
         <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-md">
           {mode === 'order' ? (
@@ -1157,6 +1318,31 @@ const Sales: React.FC<SalesProps> = ({
                 )}
               </div>
             </>
+          ) : mode === 'prompt' ? (
+              <div className="flex flex-col h-full">
+                <h2 className="text-xl font-bold mb-4 border-b pb-4">Hasil Generate Prompt</h2>
+                <div className="flex-1 bg-purple-50 rounded-lg p-6 border-2 border-dashed border-purple-200">
+                  {generatedPrompt ? (
+                    <div className="space-y-4">
+                      <div className="bg-white p-4 rounded-lg shadow-sm border border-purple-100 min-h-[15rem] whitespace-pre-wrap text-sm text-gray-700 font-mono">
+                        {generatedPrompt}
+                      </div>
+                      <button 
+                        onClick={handleCopyPrompt}
+                        className="w-full flex items-center justify-center bg-purple-600 text-white py-3 rounded-lg font-bold hover:bg-purple-700 transition-colors shadow-md"
+                      >
+                        <ClipboardIcon className="h-5 w-5 mr-2" />
+                        Copy Prompt Text
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 py-12">
+                      <WrenchScrewdriverIcon className="h-16 w-16 mb-4 opacity-50" />
+                      <p>Silakan isi data di sebelah kiri dan klik tombol "Generate Prompt" untuk melihat hasilnya di sini.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
           ) : mode === 'simulation' ? (
               <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 bg-blue-50 rounded-lg">
                 <CurrencyDollarIcon className="h-16 w-16 text-blue-400 mb-4" />

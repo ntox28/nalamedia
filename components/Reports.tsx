@@ -711,7 +711,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
             
             // Pendapatan
             pnlFilteredReceivables.forEach(r => r.payments?.forEach(p => { if (p.date >= pnlStartDate && p.date <= pnlEndDate) { const day = new Date(p.date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pendapatan += p.amount; }}));
-            pnlFilteredLegacyIncomes.forEach(i => { const day = new Date(i.month_date).getUTCDate() -1; if(dailyData[day]) dailyData[day].Pendapatan += Number(i.amount); });
+            pnlFilteredLegacyIncomes.forEach(i => { const day = new Date(i.month_date).getUTCDate() - 1; if(dailyData[day]) dailyData[day].Pendapatan += Number(i.amount); });
             
             // Pengeluaran
             pnlFilteredExpenses.forEach(e => { const day = new Date(e.date).getUTCDate() - 1; if (dailyData[day]) dailyData[day].Pengeluaran += e.amount; });
@@ -1827,7 +1827,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
                                         <td className="py-2 px-3">{i.name}</td>
                                         <td className="py-2 px-3 text-right font-semibold">{`${i.stock} ${i.unit}`}</td>
                                         <td className="py-2 px-3 text-center">
-                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${i.stock <= notificationSettings.lowStockThreshold ? 'bg-red-100 text-red-800' : 'bg-cyan-100 text-cyan-800'}`}>
+                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${i.status === 'Stok Menipis' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
                                                 {i.status}
                                             </span>
                                         </td>
@@ -1846,289 +1846,103 @@ const Reports: React.FC<ReportsProps> = (props) => {
             </div>
         );
     };
-    
-    const renderDataPenjualanLama = () => (
-        <div className="space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <MonthlyLegacyDataForm
-                    title="Pemasukan Bulanan Lama"
-                    data={legacyMonthlyIncomes}
-                    onSave={onAddLegacyMonthlyIncome}
-                    onUpdate={onUpdateLegacyMonthlyIncome}
-                    onDelete={onDeleteLegacyMonthlyIncome}
-                />
-                <MonthlyLegacyDataForm
-                    title="Pengeluaran Bulanan Lama"
-                    data={legacyMonthlyExpenses}
-                    onSave={onAddLegacyMonthlyExpense}
-                    onUpdate={onUpdateLegacyMonthlyExpense}
-                    onDelete={onDeleteLegacyMonthlyExpense}
-                />
-            </div>
-        </div>
+
+    const TabButton: React.FC<{ tabKey: string; label: string }> = ({ tabKey, label }) => (
+        <button
+            onClick={() => setActiveTab(tabKey)}
+            className={`${ activeTab === tabKey ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
+        >
+            {label}
+        </button>
     );
 
-    const renderDataPiutangLama = () => {
-        const filteredLegacyData = legacyReceivables.filter(item => {
-            if (legacyFilterCustomer && item.customer !== legacyFilterCustomer) return false;
-            if (legacyFilterStartDate && item.order_date < legacyFilterStartDate) return false;
-            if (legacyFilterEndDate && item.order_date > legacyFilterEndDate) return false;
-            return true;
-        }).sort((a,b) => b.nota_id.localeCompare(a.nota_id));
-
-        const totalLegacyPiutang = filteredLegacyData.reduce((sum, item) => sum + item.amount, 0);
-
-        const handlePrintLegacyReceivables = () => {
-            const groupedByMonth = filteredLegacyData.reduce((acc, item) => {
-                const month = item.order_date.substring(0, 7);
-                if (!acc[month]) acc[month] = [];
-                acc[month].push(item);
-                return acc;
-            }, {} as Record<string, LegacyReceivable[]>);
-
-            const sortedMonths = Object.keys(groupedByMonth).sort().reverse();
-            let tableHtml = '';
-            let itemCounter = 1;
-
-            for (const month of sortedMonths) {
-                const monthName = new Date(`${month}-02`).toLocaleString('id-ID', { month: 'long', year: 'numeric' });
-                tableHtml += `<h3 class="month-header">${monthName}</h3>`;
-                const tableRows = groupedByMonth[month].map(item => `
-                    <tr><td>${itemCounter++}</td><td>${item.nota_id}</td><td>${item.customer}</td><td>${item.description}</td><td>${item.length || '-'}</td><td>${item.width || '-'}</td><td>${item.qty}</td><td class="currency">${formatCurrency(item.amount)}</td></tr>`
-                ).join('');
-                tableHtml += `<table><thead><tr><th>No</th><th>No Nota</th><th>Pelanggan</th><th>Deskripsi</th><th>Panjang (m)</th><th>Lebar (m)</th><th>Qty</th><th class="currency">Nominal Piutang (Rp)</th></tr></thead><tbody>${tableRows}</tbody></table>`;
-            }
-
-            const summaryHtml = `<div class="summary-box"><strong>Total Piutang Lama: ${formatCurrency(totalLegacyPiutang)}</strong></div>`;
-
-            const printContent = `<html><head><title>Laporan Piutang Lama</title><style>body{font-family:sans-serif;font-size:10pt}@media print{.print-button-container{display:none}}.page{width:190mm;margin:auto}.header h1{font-size:16pt}.header h2{font-size:12pt}hr{border:0;border-top:1px solid #ccc}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ddd;padding:6px;text-align:left}th{background-color:#f2f2f2}.currency{text-align:right}.month-header{margin-top:20px;font-size:12pt;font-weight:bold;border-bottom:1px solid #ccc;padding-bottom:5px}.summary-box{text-align:right;margin-top:20px;font-size:12pt}.print-button-container{position:fixed;top:20px;right:20px;text-align:center;z-index:100}.print-button-container button{background-color:#ec4899;color:white;font-weight:bold;padding:8px 24px;border-radius:8px;border:none;cursor:pointer}</style></head><body><div class="print-button-container"><button onclick="window.print()">Cetak atau Simpan PDF</button></div><div class="page"><div class="header"><div><h2>Nala Media Digital Printing</h2></div><h1>Laporan Piutang Lama</h1></div><hr>${tableHtml}${summaryHtml}</div></body></html>`;
-            const printWindow = window.open('', '_blank');
-            if (printWindow) {
-                printWindow.document.write(printContent);
-                printWindow.document.close();
-                printWindow.focus();
-            }
-        };
-
-        return (
-            <div>
-                {isLegacyImportExportModalOpen && <LegacyReceivableImportExportModal show={isLegacyImportExportModalOpen} onClose={() => setIsLegacyImportExportModalOpen(false)} filteredData={filteredLegacyData} onAddLegacyReceivable={onAddLegacyReceivable} />}
-                <div className="flex justify-between items-center mb-4">
-                    <div className="flex items-center space-x-2">
-                        <button onClick={handlePrintLegacyReceivables} className="flex items-center text-sm bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"><PrinterIcon className="h-4 w-4 mr-2" />Cetak</button>
-                        <button onClick={() => setIsLegacyImportExportModalOpen(true)} className="flex items-center text-sm bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700"><ArrowDownTrayIcon className="h-4 w-4 mr-2" />Impor/Ekspor</button>
-                    </div>
-                    <button onClick={() => setIsLegacyFilterVisible(!isLegacyFilterVisible)} className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"><FilterIcon className="h-4 w-4" />Filter</button>
-                </div>
-                {isLegacyFilterVisible && (
-                    <div className="bg-gray-50 p-4 rounded-lg mb-4 border">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <select value={legacyFilterCustomer} onChange={e => setLegacyFilterCustomer(e.target.value)} className="p-2 border rounded-md bg-white text-sm"><option value="">Semua Pelanggan</option>{customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-                            <input type="date" value={legacyFilterStartDate} onChange={e => setLegacyFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
-                            <input type="date" value={legacyFilterEndDate} onChange={e => setLegacyFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
-                        </div>
-                         <div className="flex justify-end mt-3">
-                            <button onClick={handleResetLegacyFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
-                        </div>
-                    </div>
-                )}
-                 <div className="bg-amber-50 p-4 rounded-lg my-4 text-center">
-                    <h4 className="font-semibold text-amber-800">Total Piutang Lama (Sesuai Filter)</h4>
-                    <p className="text-2xl font-bold text-amber-700">{formatCurrency(totalLegacyPiutang)}</p>
-                </div>
-                <LegacyReceivableForm 
-                    customers={customers}
-                    legacyReceivables={filteredLegacyData}
-                    onSave={onAddLegacyReceivable}
-                    onUpdate={onUpdateLegacyReceivable}
-                    onDelete={onDeleteLegacyReceivable}
-                />
-            </div>
-        );
-    };
-    
-    // --- New Category Sales Report ---
-    const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
-        'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate'
-    };
-
-    const categorySalesData = useMemo(() => {
-        const categoryMap: Map<number, { name: string; totalItems: number; totalTurnover: number }> = new Map();
-
-        categories.forEach(cat => {
-            categoryMap.set(cat.id, { name: cat.name, totalItems: 0, totalTurnover: 0 });
-        });
-
-        const relevantOrders = allOrders.filter(order => order.orderDate >= categoryReportStartDate && order.orderDate <= categoryReportEndDate);
-
-        for (const order of relevantOrders) {
-            const customerData = customers.find(c => c.name === order.customer);
-            const customerLevel = customerData ? customerData.level : 'End Customer';
-            const priceKey = priceLevelMap[customerLevel];
-
-            for (const item of order.orderItems) {
-                if (!item.productId) continue;
-                
-                const productInfo = products.find(p => p.id === item.productId);
-                if (!productInfo) continue;
-
-                const categoryInfo = categories.find(c => c.name === productInfo.category);
-                if (!categoryInfo) continue;
-                
-                const finishingInfo = finishings.find(f => f.name === item.finishing);
-
-                const isAreaBased = categoryInfo.unitType === 'Per Luas';
-                let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-                const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-                let priceMultiplier = 1;
-
-                if (isAreaBased) {
-                    const length = parseFloat(item.length) || 0;
-                    const width = parseFloat(item.width) || 0;
-                    priceMultiplier = length * width;
-                }
-                
-                const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-                const itemFinishingTotal = finishingPrice * item.qty;
-                const itemTotalTurnover = itemMaterialTotal + itemFinishingTotal;
-
-                const currentCategoryData = categoryMap.get(categoryInfo.id)!;
-                currentCategoryData.totalItems += item.qty;
-                currentCategoryData.totalTurnover += itemTotalTurnover;
-            }
-        }
-        
-        return Array.from(categoryMap.values())
-            .filter(d => d.totalItems > 0)
-            .sort((a, b) => b.totalTurnover - a.totalTurnover);
-
-    }, [allOrders, products, categories, customers, finishings, categoryReportStartDate, categoryReportEndDate]);
-    
-    const renderCategorySalesReport = () => {
-        const totalTurnover = categorySalesData.reduce((sum, cat) => sum + cat.totalTurnover, 0);
-        const totalItemsSold = categorySalesData.reduce((sum, cat) => sum + cat.totalItems, 0);
-        const topCategory = categorySalesData[0] ? categorySalesData[0].name : 'N/A';
-        const PIE_COLORS = ['#ec4899', '#a855f7', '#8b5cf6', '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6', '#22c55e'];
-        
-        return (
-            <div className="space-y-6">
-                <div className="bg-gray-50 p-4 rounded-lg border">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                        <div><label className="text-sm font-medium text-gray-700">Tanggal Mulai</label><input type="date" value={categoryReportStartDate} onChange={e => setCategoryReportStartDate(e.target.value)} className="p-2 w-full border rounded-md text-sm text-gray-500 mt-1" /></div>
-                        <div><label className="text-sm font-medium text-gray-700">Tanggal Akhir</label><input type="date" value={categoryReportEndDate} onChange={e => setCategoryReportEndDate(e.target.value)} className="p-2 w-full border rounded-md text-sm text-gray-500 mt-1" /></div>
-                    </div>
-                     <div className="flex justify-end mt-3">
-                        <button onClick={handleResetCategoryFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <ReportStatCard icon={<CurrencyDollarIcon />} title="Total Omset" value={formatCurrency(totalTurnover)} gradient="bg-gradient-to-br from-green-500 to-emerald-500" />
-                    <ReportStatCard icon={<ShoppingCartIcon />} title="Total Item Terjual" value={totalItemsSold.toLocaleString('id-ID')} gradient="bg-gradient-to-br from-blue-500 to-sky-500" />
-                    <ReportStatCard icon={<ChartBarIcon />} title="Kategori Terlaris" value={topCategory} gradient="bg-gradient-to-br from-violet-500 to-purple-500" />
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div className="h-96">
-                        <h4 className="font-semibold mb-2">Distribusi Omset per Kategori</h4>
-                        <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                                <Pie data={categorySalesData} dataKey="totalTurnover" nameKey="name" cx="50%" cy="50%" outerRadius={120} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}>
-                                    {categorySalesData.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
-                                </Pie>
-                                <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                                <Legend />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                    <div>
-                        <h4 className="font-semibold mb-2">Rincian per Kategori</h4>
-                        <div className="overflow-auto border rounded-lg max-h-96">
-                            <table className="min-w-full text-sm">
-                                <thead className="bg-gray-50 sticky top-0">
-                                    <tr>
-                                        <th className="py-2 px-3 text-left">Nama Kategori</th>
-                                        <th className="py-2 px-3 text-right">Jumlah Item</th>
-                                        <th className="py-2 px-3 text-right">Total Omset</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                    {categorySalesData.map(cat => (
-                                        <tr key={cat.name}>
-                                            <td className="py-2 px-3 font-medium">{cat.name}</td>
-                                            <td className="py-2 px-3 text-right">{cat.totalItems.toLocaleString('id-ID')}</td>
-                                            <td className="py-2 px-3 text-right font-semibold">{formatCurrency(cat.totalTurnover)}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
-    const renderContent = () => {
-        switch (activeTab) {
-            case 'finalRecap': return renderFinalRecap();
-            case 'profitAndLoss': return renderProfitAndLoss();
-            case 'sales': return renderSales();
-            case 'categorySales': return renderCategorySalesReport();
-            case 'receivables': return renderReceivables();
-            case 'inventory': return renderInventory();
-            case 'assetsDebts': return <AssetsAndDebts assets={assets} debts={debts} onAddAsset={onAddAsset} onUpdateAsset={onUpdateAsset} onDeleteAsset={onDeleteAsset} onAddDebt={onAddDebt} onUpdateDebt={onUpdateDebt} onDeleteDebt={onDeleteDebt} />;
-            case 'dataPenjualanLama': return renderDataPenjualanLama();
-            case 'dataPiutangLama': return renderDataPiutangLama();
-            default:
-                return <div className="text-center py-16 text-gray-500"><p>Laporan "{TABS.find(t => t.key === activeTab)?.label}" sedang dalam pengembangan.</p></div>;
-        }
-    };
-    
     return (
-        <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-md">
-                <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold">Laporan</h2>
-                    <div className="flex items-center space-x-2">
-                        {['sales', 'receivables', 'inventory', 'profitAndLoss'].includes(activeTab) && (
-                            <div className="flex space-x-2">
-                                <button 
-                                    onClick={handlePrintReport} 
-                                    className="flex items-center text-sm bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-                                >
-                                    <PrinterIcon className="h-4 w-4 mr-2" />
-                                    Cetak
-                                </button>
-                                <button 
-                                    onClick={handleExport}
-                                    className="flex items-center text-sm bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors"
-                                >
-                                    <ArrowDownTrayIcon className="h-4 w-4 mr-2" />
-                                    Ekspor
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-                
-                <div className="border-b border-gray-200">
+        <div className="bg-white p-6 rounded-xl shadow-md flex flex-col h-full">
+            <h2 className="text-xl font-bold mb-4">Laporan</h2>
+            {accessibleTabs.length > 1 && (
+                <div className="border-b border-gray-200 mb-6">
                     <nav className="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
-                         {accessibleTabs.map(tab => (
-                            <button
-                                key={tab.key}
-                                onClick={() => setActiveTab(tab.key)}
-                                className={`${ activeTab.startsWith(tab.key) ? 'border-pink-500 text-pink-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
-                            >
-                                {tab.label}
-                            </button>
-                         ))}
+                        {accessibleTabs.map(tab => <TabButton key={tab.key} tabKey={tab.key} label={tab.label} />)}
                     </nav>
                 </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto min-h-[50vh] pr-2 pb-20">
+                {activeTab === 'finalRecap' && renderFinalRecap()}
+                {activeTab === 'profitAndLoss' && renderProfitAndLoss()}
+                {activeTab === 'sales' && renderSales()}
+                {activeTab === 'categorySales' && (
+                    <div className="text-center py-10 text-gray-500">Fitur Laporan Kategori belum diimplementasikan.</div>
+                )}
+                {activeTab === 'receivables' && renderReceivables()}
+                {activeTab === 'inventory' && renderInventory()}
+                {activeTab === 'assetsDebts' && (
+                    <AssetsAndDebts 
+                        assets={assets} debts={debts}
+                        onAddAsset={onAddAsset} onUpdateAsset={onUpdateAsset} onDeleteAsset={onDeleteAsset}
+                        onAddDebt={onAddDebt} onUpdateDebt={onUpdateDebt} onDeleteDebt={onDeleteDebt}
+                    />
+                )}
+                {activeTab === 'dataPenjualanLama' && (
+                    <div className="space-y-6">
+                        <MonthlyLegacyDataForm 
+                            title="Pemasukan Data Lama (Bulanan)"
+                            data={legacyMonthlyIncomes}
+                            onSave={onAddLegacyMonthlyIncome}
+                            onUpdate={onUpdateLegacyMonthlyIncome}
+                            onDelete={onDeleteLegacyMonthlyIncome}
+                        />
+                        <MonthlyLegacyDataForm 
+                            title="Pengeluaran Data Lama (Bulanan)"
+                            data={legacyMonthlyExpenses}
+                            onSave={onAddLegacyMonthlyExpense}
+                            onUpdate={onUpdateLegacyMonthlyExpense}
+                            onDelete={onDeleteLegacyMonthlyExpense}
+                        />
+                    </div>
+                )}
+                {activeTab === 'dataPiutangLama' && (
+                    <>
+                        <div className="flex justify-end mb-4">
+                             <button onClick={() => setIsLegacyImportExportModalOpen(true)} className="bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-700 transition-colors">Impor / Ekspor Excel</button>
+                        </div>
+                        <LegacyReceivableForm 
+                            customers={customers}
+                            legacyReceivables={legacyReceivables}
+                            onSave={onAddLegacyReceivable}
+                            onUpdate={onUpdateLegacyReceivable}
+                            onDelete={onDeleteLegacyReceivable}
+                        />
+                        <LegacyReceivableImportExportModal 
+                            show={isLegacyImportExportModalOpen}
+                            onClose={() => setIsLegacyImportExportModalOpen(false)}
+                            filteredData={legacyReceivables}
+                            onAddLegacyReceivable={onAddLegacyReceivable}
+                        />
+                    </>
+                )}
             </div>
-            <div className="bg-white p-6 rounded-xl shadow-md">
-                {renderContent()}
-            </div>
+            
+            {(activeTab === 'sales' || activeTab === 'receivables' || activeTab === 'profitAndLoss' || activeTab === 'inventory') && (
+                <div className="fixed bottom-8 right-8 flex flex-col gap-3 z-10">
+                    <button 
+                        onClick={handlePrintReport} 
+                        className="bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 transition-transform hover:scale-110"
+                        title="Cetak Laporan"
+                    >
+                        <PrinterIcon className="h-6 w-6" />
+                    </button>
+                    {activeTab !== 'profitAndLoss' && (
+                        <button 
+                            onClick={handleExport} 
+                            className="bg-green-600 text-white p-3 rounded-full shadow-lg hover:bg-green-700 transition-transform hover:scale-110"
+                            title="Ekspor Excel"
+                        >
+                            <ArrowDownTrayIcon className="h-6 w-6" />
+                        </button>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

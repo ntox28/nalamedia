@@ -93,17 +93,16 @@ const PaymentModal: React.FC<{
   onConfirmPayment: (orderId: string, paymentDetails: Payment, discountAmount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
 }> = ({ order, fullOrder, products, finishings, customers, categories, paymentMethods, onClose, onConfirmPayment }) => {
   const [paymentAmount, setPaymentAmount] = useState<string>('');
-  const [discount, setDiscount] = useState<string>('');
+  
+  // Discount States
+  const [discountRp, setDiscountRp] = useState<string>('');
+  const [discountPercent, setDiscountPercent] = useState<string>('');
+  const [isDiscountLocked, setIsDiscountLocked] = useState(false);
+
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
   const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
   const [editedItems, setEditedItems] = useState<OrderItemData[] | null>(fullOrder?.orderItems || null);
 
-  useEffect(() => {
-    if (order.discount) {
-        setDiscount(order.discount.toString());
-    }
-  }, [order]);
-  
   const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
     'End Customer': 'endCustomer',
     'Retail': 'retail',
@@ -154,21 +153,68 @@ const PaymentModal: React.FC<{
     return Math.ceil(total / 500) * 500;
   }, [editedItems, order.customer, products, finishings, customers, categories, order.amount]);
 
+  // Initialize discount on mount
+  useEffect(() => {
+    if (order.discount && order.discount > 0) {
+        setDiscountRp(order.discount.toString());
+        // Auto-calc percent based on current total
+        if (currentTotalAmount > 0) {
+             const pct = (order.discount / currentTotalAmount) * 100;
+             setDiscountPercent(pct.toFixed(2));
+        }
+        setIsDiscountLocked(true); 
+    } else {
+        setDiscountRp('');
+        setDiscountPercent('');
+        setIsDiscountLocked(false);
+    }
+  }, [order, currentTotalAmount]);
 
   const { totalPaid, totalSetelahDiskon, sisaTagihan } = useMemo(() => {
     const currentTotalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
-    const currentDiscount = parseFloat(discount) || 0;
-    const currentTotalSetelahDiskon = currentTotalAmount - currentDiscount;
-    const currentSisaTagihan = currentTotalSetelahDiskon - currentTotalPaid;
+    const currentDiscount = parseFloat(discountRp) || 0;
+    const currentTotalSetelahDiskon = Math.max(0, currentTotalAmount - currentDiscount);
+    const currentSisaTagihan = Math.max(0, currentTotalSetelahDiskon - currentTotalPaid);
     return {
       totalPaid: currentTotalPaid,
       totalSetelahDiskon: currentTotalSetelahDiskon,
       sisaTagihan: currentSisaTagihan,
     };
-  }, [order, discount, currentTotalAmount]);
+  }, [order, discountRp, currentTotalAmount]);
 
   const numPaymentAmount = parseFloat(paymentAmount) || 0;
   const kembalian = numPaymentAmount > sisaTagihan ? numPaymentAmount - sisaTagihan : 0;
+
+  // --- Handlers for Discount Logic ---
+  const handleDiscountPercentChange = (val: string) => {
+      setDiscountPercent(val);
+      const pct = parseFloat(val);
+      if (!isNaN(pct) && currentTotalAmount > 0) {
+          const rp = (pct / 100) * currentTotalAmount;
+          setDiscountRp(Math.floor(rp).toString());
+      } else {
+          setDiscountRp('');
+      }
+  };
+
+  const handleDiscountRpChange = (val: string) => {
+      setDiscountRp(val);
+      const rp = parseFloat(val);
+      if (!isNaN(rp) && currentTotalAmount > 0) {
+          const pct = (rp / currentTotalAmount) * 100;
+          setDiscountPercent(pct.toFixed(2));
+      } else {
+          setDiscountPercent('');
+      }
+  };
+
+  const handleLockDiscount = () => {
+      setIsDiscountLocked(true);
+  };
+
+  const handleUnlockDiscount = () => {
+      setIsDiscountLocked(false);
+  };
 
   const handlePriceOverride = (itemId: number) => {
       const item = editedItems?.find(i => i.id === itemId);
@@ -190,7 +236,7 @@ const PaymentModal: React.FC<{
 
   const handleProcessPayment = () => {
       const amountToPay = numPaymentAmount;
-      const finalDiscount = parseFloat(discount) || 0;
+      const finalDiscount = parseFloat(discountRp) || 0;
       
       if (sisaTagihan <= 0 && amountToPay > 0) {
         alert("Tagihan ini sudah lunas. Tidak dapat menambahkan pembayaran baru.");
@@ -299,22 +345,62 @@ const PaymentModal: React.FC<{
                   </div>
                 )}
 
-                <div className="border-t pt-4 space-y-2">
+                <div className="border-t pt-4 space-y-3 bg-gray-50 p-4 rounded-lg">
                     <div className="flex justify-between text-md">
                         <span className="text-gray-600">Total Tagihan</span>
                         <span className="font-semibold">{formatCurrency(currentTotalAmount)}</span>
                     </div>
-                    <div className="flex justify-between items-center text-md">
-                        <span className="text-gray-600">Diskon (Rp.)</span>
-                        <input 
-                            type="number"
-                            value={discount}
-                            onChange={e => setDiscount(e.target.value)}
-                            className="w-32 p-1 border rounded-md text-right font-semibold text-green-600 bg-green-50"
-                            placeholder="0"
-                        />
+                    
+                    {/* Discount Section */}
+                    <div className="grid grid-cols-12 gap-2 items-center">
+                        <label className="col-span-3 text-sm text-gray-600">Diskon</label>
+                        <div className="col-span-3 relative">
+                            <input 
+                                type="number"
+                                value={discountPercent}
+                                onChange={e => handleDiscountPercentChange(e.target.value)}
+                                disabled={isDiscountLocked}
+                                className="w-full p-2 border rounded-md text-right text-sm disabled:bg-gray-200"
+                                placeholder="%"
+                            />
+                            <span className="absolute right-6 top-2 text-xs text-gray-400">%</span>
+                        </div>
+                        <div className="col-span-4 relative">
+                            <input 
+                                type="number"
+                                value={discountRp}
+                                onChange={e => handleDiscountRpChange(e.target.value)}
+                                disabled={isDiscountLocked}
+                                className="w-full p-2 border rounded-md text-right text-sm font-medium text-green-700 disabled:bg-gray-200"
+                                placeholder="Rp"
+                            />
+                            <span className="absolute left-2 top-2 text-xs text-gray-400">Rp</span>
+                        </div>
+                        <div className="col-span-2">
+                            {isDiscountLocked ? (
+                                <button 
+                                    type="button" 
+                                    onClick={handleUnlockDiscount}
+                                    className="w-full bg-yellow-100 text-yellow-700 p-2 rounded-md text-xs font-semibold hover:bg-yellow-200 flex items-center justify-center"
+                                    title="Edit Diskon"
+                                >
+                                    <PencilIcon className="h-4 w-4" />
+                                </button>
+                            ) : (
+                                <button 
+                                    type="button" 
+                                    onClick={handleLockDiscount}
+                                    className="w-full bg-blue-100 text-blue-700 p-2 rounded-md text-xs font-semibold hover:bg-blue-200 flex items-center justify-center"
+                                    title="Simpan/Kunci Diskon"
+                                >
+                                    <CheckIcon className="h-4 w-4 mr-1" />
+                                    Simpan
+                                </button>
+                            )}
+                        </div>
                     </div>
-                    <div className="flex justify-between text-md font-semibold border-t pt-2">
+
+                    <div className="flex justify-between text-md font-semibold border-t border-gray-300 pt-2">
                         <span className="text-gray-800">Total Setelah Diskon</span>
                         <span>{formatCurrency(totalSetelahDiskon)}</span>
                     </div>
@@ -322,7 +408,7 @@ const PaymentModal: React.FC<{
                         <span className="text-gray-600">Sudah Dibayar</span>
                         <span>{formatCurrency(totalPaid)}</span>
                     </div>
-                    <div className="flex justify-between text-xl font-bold p-2 bg-red-50 rounded-lg">
+                    <div className="flex justify-between text-xl font-bold p-2 bg-white border border-red-100 rounded-lg">
                         <span className="text-red-700">Sisa Tagihan</span>
                         <span className="text-red-700">{formatCurrency(sisaTagihan < 0 ? 0 : sisaTagihan)}</span>
                     </div>
@@ -379,7 +465,7 @@ const PaymentModal: React.FC<{
                 <button 
                     onClick={handleProcessPayment} 
                     className="bg-pink-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-pink-700 disabled:bg-pink-300"
-                    disabled={numPaymentAmount <= 0}
+                    disabled={numPaymentAmount <= 0 && sisaTagihan > 0}
                 >
                     Proses Pembayaran
                 </button>
@@ -835,7 +921,6 @@ const Receivables: React.FC<ReceivablesProps> = ({
         if (!a.isLegacy && b.isLegacy) return -1;
         
         // Secondary sort: by ID (nota number) descending
-        // For legacy items, we need a consistent way to sort. Using ID is fine.
         const idA = a.isLegacy ? a.legacyData!.id.toString() : a.id;
         const idB = b.isLegacy ? b.legacyData!.id.toString() : b.id;
         return idB.localeCompare(idA, undefined, { numeric: true });
@@ -1399,7 +1484,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 <div class="nota-container">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 8px; border-bottom: 1px dashed black;">
                         <div style="width: 60%;">
-                            <h1 style="font-size: 18pt; font-weight: bold; margin: 0; padding: 0; line-height: 1;">
+                            <h1 style="font-size: 18pt; font-weight: bold; margin: 0; padding: 0; line-height: 1.;">
                                 <span style="color: #000000;">NALA</span>
                                 <span style="color: #000000;">MEDIA</span>
                                 <span style="font-size: 10pt; font-weight: normal; color: #000000;"> Digital Printing</span>
@@ -1849,7 +1934,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const invoiceBlocks = reportItems.map(receivable => {
             const fullOrder = allOrders.find(o => o.id === receivable.id);
             const orderDate = fullOrder ? fullOrder.orderDate : (receivable.isLegacy ? receivable.legacyData?.order_date : new Date().toISOString());
-            const displayId = receivable.type === 'legacy' ? receivable.nota_id : receivable.id;
+            const displayId = receivable.isLegacy && receivable.legacyData ? receivable.legacyData.nota_id : receivable.id;
             
             const paid = receivable.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
             const remaining = receivable.amount - (receivable.discount || 0) - paid;
@@ -1878,7 +1963,6 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
                     const sizeStr = isArea ? `${item.length}m x ${item.width}m` : '';
                     const finishStr = item.finishing && item.finishing !== 'Tanpa Finishing' ? item.finishing : '';
-                    const separator = sizeStr && finishStr ? ' | ' : '';
                     const detailsString = [sizeStr, finishStr].filter(Boolean).join(' | ');
                     
                     const isFirstItem = index === 0;
@@ -1925,8 +2009,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
                             <tr style="background-color: #f2f2f2; border-bottom: 1px solid #aaa;">
                                 <th style="text-align: left; padding: 6px;">Deskripsi item</th>
                                 <th style="text-align: center; width: 50px; padding: 6px;">Qty</th>
-                                <th class="currency" style="width: 100px; padding: 6px;">Total/Item</th>
-                                <th class="currency" style="width: 100px; padding: 6px;">Tagihan</th>
+                                <th class="currency" style="width: 100px; padding: 6px;">Total Per item</th>
+                                <th class="currency" style="width: 100px; padding: 6px;">Total Tagihan</th>
                                 <th class="currency" style="width: 100px; padding: 6px;">Sisa</th>
                             </tr>
                         </thead>

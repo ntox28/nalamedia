@@ -1,5 +1,6 @@
 {
-  "name": "Nala V2.1.2",
+  "name": "Remix: Nala V3.1.1 coba",
   "description": "Nala Media Project",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }
