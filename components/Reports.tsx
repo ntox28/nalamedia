@@ -547,6 +547,56 @@ const Reports: React.FC<ReportsProps> = (props) => {
     onAddLegacyReceivable, onUpdateLegacyReceivable, onDeleteLegacyReceivable,
     onAddAsset, onUpdateAsset, onDeleteAsset, onAddDebt, onUpdateDebt, onDeleteDebt
     } = props;
+
+    // Indexed Maps untuk pencarian instan O(1) tanpa perulangan linier 15.000 data
+    const ordersMap = useMemo(() => {
+        const map = new Map<string, SavedOrder>();
+        for (let i = 0; i < allOrders.length; i++) {
+            map.set(allOrders[i].id, allOrders[i]);
+        }
+        return map;
+    }, [allOrders]);
+
+    const receivablesMap = useMemo(() => {
+        const map = new Map<string, ReceivableItem>();
+        for (let i = 0; i < receivables.length; i++) {
+            map.set(receivables[i].id, receivables[i]);
+        }
+        return map;
+    }, [receivables]);
+
+    const productsMap = useMemo(() => {
+        const map = new Map<number, ProductData>();
+        for (let i = 0; i < products.length; i++) {
+            map.set(products[i].id, products[i]);
+        }
+        return map;
+    }, [products]);
+
+    const categoriesMap = useMemo(() => {
+        const map = new Map<string, CategoryData>();
+        for (let i = 0; i < categories.length; i++) {
+            map.set(categories[i].name, categories[i]);
+        }
+        return map;
+    }, [categories]);
+
+    const customersMap = useMemo(() => {
+        const map = new Map<string, CustomerData>();
+        for (let i = 0; i < customers.length; i++) {
+            map.set(customers[i].name, customers[i]);
+        }
+        return map;
+    }, [customers]);
+
+    const finishingsMap = useMemo(() => {
+        const map = new Map<string, FinishingData>();
+        for (let i = 0; i < finishings.length; i++) {
+            map.set(finishings[i].name, finishings[i]);
+        }
+        return map;
+    }, [finishings]);
+
     const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`reports/${tab.key}`)), [menuPermissions]);
     const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
     const [currentPage, setCurrentPage] = useState(1);
@@ -574,8 +624,15 @@ const Reports: React.FC<ReportsProps> = (props) => {
     const [categoryReportEndDate, setCategoryReportEndDate] = useState(lastDay);
 
     const years = useMemo(() => {
-        const orderYears = allOrders.map(order => new Date(order.orderDate).getFullYear());
-        return Array.from(new Set(orderYears)).sort((a, b) => b - a);
+        const yearSet = new Set<number>();
+        for (let i = 0; i < allOrders.length; i++) {
+            const rawYear = allOrders[i].orderDate?.substring(0, 4);
+            if (rawYear) {
+                const y = parseInt(rawYear, 10);
+                if (!isNaN(y)) yearSet.add(y);
+            }
+        }
+        return Array.from(yearSet).sort((a, b) => b - a);
     }, [allOrders]);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     
@@ -1015,8 +1072,9 @@ const Reports: React.FC<ReportsProps> = (props) => {
             }, 0);
         const totalPiutang = totalPiutangLegacy + totalPiutangNew;
         
-        const ordersThisYear = allOrders.filter(o => new Date(o.orderDate).getFullYear() === selectedYear);
-        const expensesThisYear = expenses.filter(e => new Date(e.date).getFullYear() === selectedYear).reduce((sum, e) => sum + e.amount, 0);
+        const selectedYearStr = selectedYear.toString();
+        const ordersThisYear = allOrders.filter(o => o.orderDate?.startsWith(selectedYearStr));
+        const expensesThisYear = expenses.filter(e => e.date?.startsWith(selectedYearStr)).reduce((sum, e) => sum + e.amount, 0);
         
         const ordersThisYearIds = new Set(ordersThisYear.map(o => o.id));
         const totalSalesThisYear = ordersThisYear.reduce((sum, o) => sum + o.totalPrice, 0);
@@ -1035,20 +1093,22 @@ const Reports: React.FC<ReportsProps> = (props) => {
         // Sum payments from new system
         receivables.forEach(r => {
             r.payments?.forEach(p => {
-                const paymentDate = new Date(p.date);
-                if (paymentDate.getFullYear() === selectedYear) {
-                    const monthIndex = paymentDate.getMonth();
-                    monthlyIncomeData[monthIndex]['Total Pemasukan'] += p.amount;
+                if (p.date?.startsWith(selectedYearStr)) {
+                    const monthIndex = parseInt(p.date.substring(5, 7), 10) - 1;
+                    if (monthIndex >= 0 && monthIndex < 12) {
+                        monthlyIncomeData[monthIndex]['Total Pemasukan'] += p.amount;
+                    }
                 }
             });
         });
 
         // Sum legacy income
         legacyMonthlyIncomes.forEach(i => {
-            const incomeDate = new Date(i.month_date);
-             if (incomeDate.getFullYear() === selectedYear) {
-                const monthIndex = incomeDate.getMonth();
-                monthlyIncomeData[monthIndex]['Total Pemasukan'] += i.amount;
+            if (i.month_date?.startsWith(selectedYearStr)) {
+                const monthIndex = parseInt(i.month_date.substring(5, 7), 10) - 1;
+                if (monthIndex >= 0 && monthIndex < 12) {
+                    monthlyIncomeData[monthIndex]['Total Pemasukan'] += i.amount;
+                }
             }
         });
 
@@ -1093,14 +1153,14 @@ const Reports: React.FC<ReportsProps> = (props) => {
             'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate'
         };
         const calculateItemPrice = (item: OrderItemData, orderCustomer: string): number => {
-            const customerData = customers.find(c => c.name === orderCustomer);
+            const customerData = customersMap.get(orderCustomer);
             const customerLevel = customerData ? customerData.level : 'End Customer';
             const priceKey = priceLevelMap[customerLevel];
             if (!item.productId) return 0;
-            const productInfo = products.find(p => p.id === item.productId);
-            const finishingInfo = finishings.find(f => f.name === item.finishing);
+            const productInfo = productsMap.get(item.productId);
+            const finishingInfo = finishingsMap.get(item.finishing);
             if (!productInfo) return 0;
-            const categoryInfo = categories.find(c => c.name === productInfo.category);
+            const categoryInfo = categoriesMap.get(productInfo.category);
             const isAreaBased = categoryInfo?.unitType === 'Per Luas';
             let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
             const finishingPrice = finishingInfo ? finishingInfo.price : 0;
@@ -1115,13 +1175,15 @@ const Reports: React.FC<ReportsProps> = (props) => {
         };
 
         return filteredSalesData.flatMap(order => {
-            const unroundedOrderTotal = order.orderItems.reduce((sum, item) => sum + calculateItemPrice(item, order.customer), 0);
+            const itemPrices = order.orderItems.map(item => calculateItemPrice(item, order.customer));
+            const unroundedOrderTotal = itemPrices.reduce((sum, p) => sum + p, 0);
             const roundingDifference = order.totalPrice - unroundedOrderTotal;
+            const receivable = receivablesMap.get(order.id);
+            const status = receivable ? receivable.paymentStatus : 'Belum Diproses';
 
             return order.orderItems.map((item, index) => {
-                const product = products.find(p => p.id === item.productId);
-                const receivable = receivables.find(r => r.id === order.id);
-                let itemTotal = calculateItemPrice(item, order.customer);
+                const product = item.productId ? productsMap.get(item.productId) : null;
+                let itemTotal = itemPrices[index];
 
                 if (index === order.orderItems.length - 1) {
                     itemTotal += roundingDifference;
@@ -1139,11 +1201,11 @@ const Reports: React.FC<ReportsProps> = (props) => {
                     l: item.width,
                     qty: item.qty,
                     total: itemTotal,
-                    status: receivable ? receivable.paymentStatus : 'Belum Diproses'
+                    status
                 };
-            })
+            });
         });
-    }, [filteredSalesData, products, categories, customers, finishings, receivables]);
+    }, [filteredSalesData, productsMap, categoriesMap, customersMap, finishingsMap, receivablesMap]);
     
     const sortedDetailedSalesData = useMemo(() => {
         let sortableItems = [...allDetailedSalesData];
@@ -1202,11 +1264,12 @@ const Reports: React.FC<ReportsProps> = (props) => {
         
         const unpaidNewSystem = receivables
             .filter(r => {
-                const order = allOrders.find(o => o.id === r.id);
+                if (r.paymentStatus !== 'Belum Lunas') return false;
+                const order = ordersMap.get(r.id);
                 if (!order) return false; // Ensure order data exists
                 if (order.orderDate < startDate || order.orderDate > endDate) return false;
                 if (receivablesCustomer && !r.customer.toLowerCase().includes(receivablesCustomer.toLowerCase())) return false;
-                return r.paymentStatus === 'Belum Lunas';
+                return true;
             })
             .map(r => {
                 const paid = r.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
@@ -1238,7 +1301,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
         return [...unpaidNewSystem, ...unpaidLegacy]
             .filter(item => item.remaining > 0)
             .sort((a, b) => new Date(b.due).getTime() - new Date(a.due).getTime());
-    }, [receivables, legacyReceivables, allOrders, getReceivablesDateRange, receivablesCustomer]);
+    }, [receivables, legacyReceivables, ordersMap, getReceivablesDateRange, receivablesCustomer]);
     
     const paginatedReceivables = useMemo(() => {
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -1320,11 +1383,11 @@ const Reports: React.FC<ReportsProps> = (props) => {
                 </tr>`;
                 
             tableRows = reportItems.flatMap(receivable => {
-                const fullOrder = allOrders.find(o => o.id === receivable.id);
+                const fullOrder = ordersMap.get(receivable.id);
                 if (!fullOrder) return [];
         
                 return fullOrder.orderItems.map((item, index) => {
-                    const product = products.find(p => p.id === item.productId);
+                    const product = item.productId ? productsMap.get(item.productId) : null;
                     const isFirstItem = index === 0;
         
                     return `

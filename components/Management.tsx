@@ -351,6 +351,20 @@ const EditOrderModal: React.FC<{
     const [customer, setCustomer] = useState(order.customer);
     const [orderDate, setOrderDate] = useState(order.orderDate);
     const [totalPrice, setTotalPrice] = useState(0);
+
+    const sortedProducts = useMemo(() => {
+        return [...products].sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
+    }, [products]);
+
+    const sortedFinishings = useMemo(() => {
+        return [...finishings].sort((a, b) => {
+            const isATanpa = a.name.trim().toLowerCase() === 'tanpa finishing';
+            const isBTanpa = b.name.trim().toLowerCase() === 'tanpa finishing';
+            if (isATanpa && !isBTanpa) return -1;
+            if (!isATanpa && isBTanpa) return 1;
+            return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+        });
+    }, [finishings]);
     
     const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
         'End Customer': 'endCustomer',
@@ -482,13 +496,13 @@ const EditOrderModal: React.FC<{
                                     <label className="block text-sm font-medium">Bahan</label>
                                     <select value={item.productId ?? ''} onChange={(e) => handleItemChange(item.id, 'productId', parseInt(e.target.value))} className="mt-1 w-full p-2 border bg-white rounded-md" required>
                                         <option value="">Pilih Bahan</option>
-                                        {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                        {sortedProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                     </select>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium">Finishing</label>
                                     <select value={item.finishing} onChange={(e) => handleItemChange(item.id, 'finishing', e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
-                                        {finishings.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                                        {sortedFinishings.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
                                     </select>
                                 </div>
                             </div>

@@ -22,14 +22,14 @@ const formatDate = (dateString: string) => new Date(dateString).toLocaleDateStri
     year: 'numeric'
 });
 
-// Helper function to calculate price for a single order item
+// Helper function to calculate price for a single order item with O(1) Maps
 const calculateItemPrice = (
     item: OrderItemData,
     orderCustomer: string,
-    products: ProductData[],
-    categories: CategoryData[],
-    customers: CustomerData[],
-    finishings: FinishingData[]
+    productsMap: Map<number, ProductData>,
+    categoriesMap: Map<string, CategoryData>,
+    customersMap: Map<string, CustomerData>,
+    finishingsMap: Map<string, FinishingData>
 ): number => {
     const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
         'End Customer': 'endCustomer',
@@ -39,18 +39,18 @@ const calculateItemPrice = (
         'Corporate': 'corporate'
     };
     
-    const customerData = customers.find(c => c.name === orderCustomer);
+    const customerData = customersMap.get(orderCustomer);
     const customerLevel = customerData ? customerData.level : 'End Customer';
     const priceKey = priceLevelMap[customerLevel];
     
     if (!item.productId) return 0;
     
-    const productInfo = products.find(p => p.id === item.productId);
-    const finishingInfo = finishings.find(f => f.name === item.finishing);
+    const productInfo = productsMap.get(item.productId);
+    const finishingInfo = finishingsMap.get(item.finishing);
     
     if (!productInfo) return 0;
 
-    const categoryInfo = categories.find(c => c.name === productInfo.category);
+    const categoryInfo = categoriesMap.get(productInfo.category);
     const isAreaBased = categoryInfo?.unitType === 'Per Luas';
 
     let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
@@ -86,12 +86,18 @@ export const exportToExcel = (
         const transactions = data.transactions as SavedOrder[];
         const { products, categories, customers, finishings, receivables } = extraData;
 
+        const productsMap = new Map<number, ProductData>(products.map(p => [p.id, p]));
+        const categoriesMap = new Map<string, CategoryData>(categories.map(c => [c.name, c]));
+        const customersMap = new Map<string, CustomerData>(customers.map(c => [c.name, c]));
+        const finishingsMap = new Map<string, FinishingData>(finishings.map(f => [f.name, f]));
+        const receivablesMap = new Map<string, ReceivableItem>(receivables.map(r => [r.id, r]));
+
         let rowNum = 1;
         const flattenedData = transactions.flatMap(order => 
             order.orderItems.map(item => {
-                const product = products.find(p => p.id === item.productId);
-                const receivable = receivables.find(r => r.id === order.id);
-                const itemTotal = calculateItemPrice(item, order.customer, products, categories, customers, finishings);
+                const product = item.productId ? productsMap.get(item.productId) : null;
+                const receivable = receivablesMap.get(order.id);
+                const itemTotal = calculateItemPrice(item, order.customer, productsMap, categoriesMap, customersMap, finishingsMap);
                 
                 return {
                     'No.': rowNum++,

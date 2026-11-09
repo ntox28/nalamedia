@@ -219,7 +219,7 @@ export interface PayrollRecord {
 }
 
 // --- User Management Types ---
-export type UserLevel = 'Kasir' | 'Office' | 'Produksi' | 'Admin' | 'Nonaktif';
+export type UserLevel = 'Kasir' | 'Office' | 'Produksi' | 'Admin';
 
 // This maps to the `profiles` table in Supabase
 export interface Profile {
@@ -283,7 +283,6 @@ export interface NotificationSettings {
   receivableOverdueAlert: boolean;
   newOrderInQueueAlert: boolean;
   defaultDueDateDays: number;
-  defaultReportDays?: number;
 }
 
 export interface StoreInfo {

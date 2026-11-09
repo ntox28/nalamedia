@@ -51,31 +51,17 @@ const DEFAULT_PAYMENT_METHODS: PaymentMethod[] = [
     { id: 'cash-default', name: 'Tunai', type: 'Tunai', details: 'Pembayaran tunai di kasir' }
 ];
 
-// Helper function to fetch all data from a table with pagination and server-side filtering
-const fetchAllWithPagination = async (
-    tableName: string, 
-    dateFilterColumn?: string, 
-    startDate?: string,
-    orFilter?: string
-) => {
+// Helper function to fetch all data from a table with pagination
+const fetchAllWithPagination = async (tableName: string) => {
     const BATCH_SIZE = 1000;
     let allData: any[] = [];
     let from = 0;
     
     while (true) {
-        let query = supabase
+        const { data, error } = await supabase
             .from(tableName)
-            .select('*');
-            
-        if (dateFilterColumn && startDate) {
-            query = query.gte(dateFilterColumn, startDate);
-        }
-        
-        if (orFilter) {
-            query = query.or(orFilter);
-        }
-        
-        const { data, error } = await query.range(from, from + BATCH_SIZE - 1);
+            .select('*')
+            .range(from, from + BATCH_SIZE - 1);
             
         if (error) {
             console.error(`Error fetching paginated data for ${tableName}:`, error);
@@ -172,46 +158,11 @@ const App: React.FC = () => {
     setNotifications([]);
   }, []);
 
-  const fetchAllData = useCallback(async (currentProfile?: Profile) => {
-    const activeProfile = currentProfile || profile;
-    
-    // Safety check: block if user is inactive
-    if (activeProfile && (activeProfile.level === 'Nonaktif' || activeProfile.level === 'Non Aktif')) {
-      console.warn("User is inactive, blocking fetchAllData");
-      return;
-    }
-
+  const fetchAllData = useCallback(async () => {
     console.log("Fetching all data from Supabase...");
-    
-    // Fetch settings first to get the default_report_days
-    const { data: settingsData, error: settingsError } = await supabase.from('app_settings').select('*');
-    if (settingsError) {
-        console.error("Error fetching app_settings during init:", settingsError.message);
-    }
-
-    let defaultReportDays = 30; // default backup
-    if (settingsData) {
-        // Option 1: check standalone key
-        const reportDaysSetting = settingsData.find((s: any) => s.key === 'default_report_days');
-        if (reportDaysSetting && typeof reportDaysSetting.value === 'number') {
-            defaultReportDays = reportDaysSetting.value;
-        } else {
-            // Option 2: check inside notificationSettings key
-            const notifSetting = settingsData.find((s: any) => s.key === 'notificationSettings');
-            if (notifSetting && notifSetting.value && typeof notifSetting.value.defaultReportDays === 'number') {
-                defaultReportDays = notifSetting.value.defaultReportDays;
-            }
-        }
-    }
-
-    // Calculate startDate based on defaultReportDays
-    const today = new Date();
-    today.setDate(today.getDate() - defaultReportDays);
-    const startDate = today.toISOString().substring(0, 10);
-
     const tableFetchPromises = {
-        orders: fetchAllWithPagination('orders', 'orderDate', startDate),
-        receivables: fetchAllWithPagination('receivables', undefined, undefined, `paymentStatus.eq.Belum Lunas,due.gte.${startDate}`),
+        orders: fetchAllWithPagination('orders'),
+        receivables: fetchAllWithPagination('receivables'),
         products: fetchAllWithPagination('products'),
         categories: fetchAllWithPagination('categories'),
         finishings: fetchAllWithPagination('finishings'),
@@ -222,14 +173,14 @@ const App: React.FC = () => {
         attendance: fetchAllWithPagination('attendance'),
         payroll_records: fetchAllWithPagination('payroll_records'),
         inventory: fetchAllWithPagination('inventory'),
-        expenses: fetchAllWithPagination('expenses', 'date', startDate),
+        expenses: fetchAllWithPagination('expenses'),
         profiles: fetchAllWithPagination('profiles'),
         legacy_data: fetchAllWithPagination('legacy_data'),
         legacy_expense: fetchAllWithPagination('legacy_expense'),
         legacy_receivables: fetchAllWithPagination('legacy_receivables'),
         assets: fetchAllWithPagination('assets'),
         debts: fetchAllWithPagination('debts'),
-        app_settings: Promise.resolve({ data: settingsData, error: null }),
+        app_settings: fetchAllWithPagination('app_settings'),
         app_sequences: supabase.from('app_sequences').select('current_value, prefix').eq('name', 'order_nota').single(),
     };
 
@@ -336,18 +287,8 @@ const App: React.FC = () => {
                 name: userProfile.name,
                 level: userProfile.level
             };
-            
-            if (mappedProfile.level === 'Nonaktif' || mappedProfile.level === 'Non Aktif') {
-              console.warn("User profile is inactive, blocking data fetch and signing out.");
-              alert("Akun Anda dinonaktifkan. Silakan hubungi Administrator.");
-              await supabase.auth.signOut();
-              clearAllData();
-              setIsLoading(false);
-              return;
-            }
-
             setProfile(mappedProfile);
-            await fetchAllData(mappedProfile);
+            await fetchAllData();
           }
         } else {
           clearAllData();

@@ -66,7 +66,6 @@ const EditProfileModal: React.FC<{
                             <option value="Office">Office</option>
                             <option value="Produksi">Produksi</option>
                             <option value="Admin">Admin</option>
-                            <option value="Nonaktif">Nonaktif</option>
                         </select>
                         {!isLevelEditable && (
                             <p className="text-xs text-gray-500 mt-1">Hanya Admin yang dapat mengubah level pengguna.</p>
@@ -112,7 +111,6 @@ const AddProfileModal: React.FC<{
                             <option value="Office">Office</option>
                             <option value="Produksi">Produksi</option>
                             <option value="Admin">Admin</option>
-                            <option value="Nonaktif">Nonaktif</option>
                         </select>
                     </div>
                      <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded-md">
@@ -239,7 +237,7 @@ const PaymentMethodsManager: React.FC<{
 
 
 // --- Menu Access Manager Component ---
-const allUserLevels: UserLevel[] = ['Kasir', 'Office', 'Produksi', 'Admin', 'Nonaktif'];
+const allUserLevels: UserLevel[] = ['Kasir', 'Office', 'Produksi', 'Admin'];
 
 const MenuAccessManager: React.FC<{
     permissions: MenuPermissions;
@@ -458,23 +456,6 @@ const NotificationSettingsManager: React.FC<{
                             type="number"
                             name="defaultDueDateDays"
                             value={localSettings.defaultDueDateDays ?? 7}
-                            onChange={handleChange}
-                            className="w-20 p-1 border rounded-md text-sm text-center"
-                        />
-                        <span className="text-sm text-gray-600">hari</span>
-                    </div>
-                </div>
-
-                <div className="flex justify-between items-center p-4 border rounded-lg">
-                    <div>
-                        <h4 className="font-semibold text-gray-800">Batas Pengambilan Data Historis (Egress)</h4>
-                        <p className="text-sm text-gray-500">Jumlah hari untuk membatasi kueri default data penjualan, piutang lunas, dan pengeluaran.</p>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                         <input
-                            type="number"
-                            name="defaultReportDays"
-                            value={localSettings.defaultReportDays ?? 30}
                             onChange={handleChange}
                             className="w-20 p-1 border rounded-md text-sm text-center"
                         />

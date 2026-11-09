@@ -824,7 +824,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [selectedOrder, setSelectedOrder] = useState<DisplayReceivable | null>(null);
   const [actionsMenu, setActionsMenu] = useState<string | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
-  const [isFilterVisible, setIsFilterVisible] = useState(false);
+  const [isFilterVisible, setIsFilterVisible] = useState(true);
   const [isBulkPayModalOpen, setBulkPayModalOpen] = useState(false);
   const [isInitialCashModalOpen, setInitialCashModalOpen] = useState(false);
   const [isBulkDueDateModalOpen, setBulkDueDateModalOpen] = useState(false);
@@ -841,12 +841,28 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
 
-  // Filter states
+  // Default filter: 30 hari terakhir & status Belum Lunas
+  const defaultStartDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().substring(0, 10);
+  }, []);
+
+  // Filter states: Default 30 hari terakhir dan status Belum Lunas
   const [filterSearch, setFilterSearch] = useState('');
   const [filterCustomer, setFilterCustomer] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
-  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('Belum Lunas');
+  const [filterStartDate, setFilterStartDate] = useState(defaultStartDate);
   const [filterEndDate, setFilterEndDate] = useState('');
+
+  // Indexed Map untuk lookup order secara instan O(1) tanpa perulangan linier 15.000 data
+  const ordersMap = useMemo(() => {
+    const map = new Map<string, SavedOrder>();
+    for (let i = 0; i < allOrders.length; i++) {
+      map.set(allOrders[i].id, allOrders[i]);
+    }
+    return map;
+  }, [allOrders]);
 
   const allDisplayItems: DisplayReceivable[] = useMemo(() => {
     const processedItems: DisplayReceivable[] = receivables.map(r => ({ ...r, isUnprocessed: false, isLegacy: false }));
@@ -894,12 +910,14 @@ const Receivables: React.FC<ReceivablesProps> = ({
   }, [allDisplayItems]);
 
   const filteredItems = useMemo(() => {
-    return allDisplayItems.filter(item => {
-      const order = allOrders.find(o => o.id === item.id);
-      const orderDate = item.isLegacy ? item.legacyData!.order_date : order?.orderDate;
+    const lowerCaseSearch = filterSearch.trim().toLowerCase();
 
-      const lowerCaseSearch = filterSearch.toLowerCase();
-      if (filterSearch && !item.id.toLowerCase().includes(lowerCaseSearch) && !item.customer.toLowerCase().includes(lowerCaseSearch)) {
+    return allDisplayItems.filter(item => {
+      // Lookup O(1) cepat menggunakan Map
+      const order = ordersMap.get(item.id);
+      const orderDate = item.isLegacy ? item.legacyData?.order_date : (order?.orderDate || item.due);
+
+      if (lowerCaseSearch && !item.id.toLowerCase().includes(lowerCaseSearch) && !item.customer.toLowerCase().includes(lowerCaseSearch)) {
         return false;
       }
       if (filterCustomer && item.customer !== filterCustomer) {
@@ -925,7 +943,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const idB = b.isLegacy ? b.legacyData!.id.toString() : b.id;
         return idB.localeCompare(idA, undefined, { numeric: true });
     });
-  }, [allDisplayItems, allOrders, filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
+  }, [allDisplayItems, ordersMap, filterSearch, filterCustomer, filterStatus, filterStartDate, filterEndDate]);
   
   const paginatedItems = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -941,6 +959,14 @@ const Receivables: React.FC<ReceivablesProps> = ({
     setFilterCustomer('');
     setFilterStatus('');
     setFilterStartDate('');
+    setFilterEndDate('');
+  };
+
+  const handleDefaultFilters = () => {
+    setFilterSearch('');
+    setFilterCustomer('');
+    setFilterStatus('Belum Lunas');
+    setFilterStartDate(defaultStartDate);
     setFilterEndDate('');
   };
 
@@ -1042,7 +1068,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   
   const getItemsCount = (cards: CardData[]): number => {
       return cards.reduce((sum, card) => {
-          const order = allOrders.find(o => o.id === card.id);
+          const order = ordersMap.get(card.id);
           return sum + (order?.orderItems.length || 0);
       }, 0);
   };
@@ -1054,10 +1080,13 @@ const Receivables: React.FC<ReceivablesProps> = ({
             .filter(r => r.productionStatus === 'Telah Dikirim' && r.deliveryDate === today)
             .map(r => r.id)
     );
-    return allOrders
-        .filter(o => deliveredTodayIds.has(o.id))
-        .reduce((sum, order) => sum + order.orderItems.length, 0);
-  }, [receivables, allOrders, today]);
+    let count = 0;
+    deliveredTodayIds.forEach(id => {
+        const order = ordersMap.get(id);
+        if (order) count += order.orderItems.length;
+    });
+    return count;
+  }, [receivables, ordersMap, today]);
 
   const handleOpenPaymentModal = (order: DisplayReceivable) => {
     setSelectedOrder(order);
@@ -1131,7 +1160,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   // --- END: Data calculations for Summary Modal ---
 
   const handlePrintReceipt = (order: ReceivableItem) => {
-    const fullOrder = allOrders.find(o => o.id === order.id);
+    const fullOrder = ordersMap.get(order.id);
     if (!fullOrder) {
         alert("Detail order tidak ditemukan!");
         return;
@@ -1318,8 +1347,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
     }
   };
   
-    const handlePrintDotMatrixNota = (order: ReceivableItem) => {
-    const fullOrder = allOrders.find(o => o.id === order.id);
+  const handlePrintDotMatrixNota = (order: ReceivableItem) => {
+    const fullOrder = ordersMap.get(order.id);
     if (!fullOrder) {
         alert("Detail order tidak ditemukan!");
         return;
@@ -1560,7 +1589,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
 
   const handleSendWhatsApp = (order: ReceivableItem) => {
-    const fullOrder = allOrders.find(o => o.id === order.id);
+    const fullOrder = ordersMap.get(order.id);
     const customerData = customers.find(c => c.name === order.customer);
 
     if (!fullOrder || !customerData || !customerData.contact) {
@@ -1664,8 +1693,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
     setActionsMenu(null);
   };
   
-    const handlePreviewInvoice = (order: ReceivableItem) => {
-    const fullOrder = allOrders.find(o => o.id === order.id);
+  const handlePreviewInvoice = (order: ReceivableItem) => {
+    const fullOrder = ordersMap.get(order.id);
     const customer = customers.find(c => c.name === order.customer);
 
     if (!fullOrder || !customer) {
@@ -1932,7 +1961,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         };
 
         const invoiceBlocks = reportItems.map(receivable => {
-            const fullOrder = allOrders.find(o => o.id === receivable.id);
+            const fullOrder = ordersMap.get(receivable.id);
             const orderDate = fullOrder ? fullOrder.orderDate : (receivable.isLegacy ? receivable.legacyData?.order_date : new Date().toISOString());
             const displayId = receivable.isLegacy && receivable.legacyData ? receivable.legacyData.nota_id : receivable.id;
             
@@ -2216,10 +2245,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 </div>
                 <button 
                   onClick={() => setIsFilterVisible(!isFilterVisible)}
-                  className="flex items-center space-x-2 text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg text-sm font-semibold"
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    (filterStatus || filterStartDate || filterEndDate || filterCustomer || filterSearch)
+                      ? 'bg-pink-100 text-pink-700 hover:bg-pink-200 border border-pink-300'
+                      : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                  }`}
                 >
                   <FilterIcon className="h-4 w-4" />
                   <span>Filter</span>
+                  {(filterStatus || filterStartDate) && (
+                    <span className="ml-1 px-1.5 py-0.5 text-xs bg-pink-600 text-white rounded-full font-bold">Aktif</span>
+                  )}
                 </button>
             </div>
         </div>
@@ -2273,7 +2309,11 @@ const Receivables: React.FC<ReceivablesProps> = ({
                             Laporan Pelanggan
                         </button>
                     </div>
-                    <button onClick={handleResetFilters} className="text-sm text-pink-600 hover:underline">Reset Filter</button>
+                    <div className="flex items-center space-x-3">
+                        <button onClick={handleDefaultFilters} className="text-xs text-gray-700 hover:text-pink-600 font-medium bg-gray-100 hover:bg-gray-200 px-2.5 py-1 rounded border">Default (30 Hari Belum Lunas)</button>
+                        <span className="text-gray-300">|</span>
+                        <button onClick={handleResetFilters} className="text-xs text-pink-600 hover:underline">Tampilkan Semua (Reset)</button>
+                    </div>
                 </div>
             </div>
         )}
@@ -2294,7 +2334,9 @@ const Receivables: React.FC<ReceivablesProps> = ({
             </thead>
             <tbody className="divide-y divide-gray-200">
               {paginatedItems.length > 0 ? paginatedItems.map(item => {
-                const orderDate = item.isLegacy ? new Date(item.legacyData!.order_date).toLocaleDateString('id-ID') : (allOrders.find(o => o.id === item.id) ? new Date(allOrders.find(o => o.id === item.id)!.orderDate).toLocaleDateString('id-ID') : 'N/A');
+                const order = ordersMap.get(item.id);
+                const rawDate = item.isLegacy ? item.legacyData?.order_date : (order?.orderDate || item.due);
+                const orderDate = rawDate ? new Date(rawDate).toLocaleDateString('id-ID') : 'N/A';
 
                 return (
                   <tr key={item.id} className="hover:bg-gray-50">
@@ -2393,7 +2435,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
       {selectedOrder && (
         <PaymentModal 
           order={selectedOrder}
-          fullOrder={allOrders.find(o => o.id === selectedOrder.id)}
+          fullOrder={ordersMap.get(selectedOrder.id)}
           products={products}
           finishings={finishings}
           customers={customers}
