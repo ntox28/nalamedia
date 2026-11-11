@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Cog6ToothIcon, PlusCircleIcon, TrashIcon, PencilIcon, PrinterIcon, PlayIcon, ClipboardIcon, ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon, CurrencyDollarIcon } from './Icons';
+import { Cog6ToothIcon, PlusCircleIcon, TrashIcon, PencilIcon, PrinterIcon, PlayIcon, ClipboardIcon, ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon, CurrencyDollarIcon, TagIcon } from './Icons';
 import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData, type ReceivableItem, type Profile } from '../types';
+import MarkupInvoice from './MarkupInvoice';
 
 const getInitialState = () => ({
   orderItems: [{ 
@@ -378,7 +379,7 @@ const Sales: React.FC<SalesProps> = ({
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotaSettingsOpen, setIsNotaSettingsOpen] = useState(false);
-  const [mode, setMode] = useState<'order' | 'simulation' | 'legacy' | 'prompt'>('order');
+  const [mode, setMode] = useState<'order' | 'simulation' | 'markup' | 'legacy' | 'prompt'>('order');
   const [simulationResult, setSimulationResult] = useState<SavedOrder | null>(null);
 
   // State for prompt generator
@@ -651,7 +652,7 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
     setEditingOrderId(null);
   }, []);
 
-  const handleModeChange = (newMode: 'order' | 'simulation' | 'legacy') => {
+  const handleModeChange = (newMode: 'order' | 'simulation' | 'markup' | 'legacy' | 'prompt') => {
     if (mode === newMode) return;
 
     if (editingOrderId) {
@@ -665,7 +666,7 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
             setCustomer(SIMULATION_CUSTOMERS[0]);
             setCustomerInputValue(SIMULATION_CUSTOMERS[0]);
         }
-    } else { // 'order' or 'legacy'
+    } else { // 'order' or 'legacy' or 'markup' or 'prompt'
         if (SIMULATION_CUSTOMERS.includes(customer)) {
             setCustomer('');
             setCustomerInputValue('');
@@ -909,6 +910,7 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
   const canAccessLegacyInput = profile?.level === 'Admin' || profile?.level === 'Kasir';
   const formTitle = 
     mode === 'simulation' ? 'Simulasi Harga Cetak' :
+    mode === 'markup' ? 'Nota Markup Khusus Reseller' :
     mode === 'legacy' ? 'Masukan Piutang Lama' :
     mode === 'prompt' ? 'AI Prompt Generator Desain' :
     editingOrderId ? `Edit Order ${editingOrderId}` : 'Tambah Order Baru';
@@ -1002,19 +1004,22 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
             {mode === 'order' && <button onClick={handleNewOrder} className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-300">Buat Baru</button>}
           </div>
           
-           <div className="flex mb-6 border border-gray-200 rounded-lg p-1 bg-gray-100 max-w-2xl">
-              <button type="button" onClick={() => handleModeChange('order')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'order' ? 'bg-white text-pink-600 shadow' : 'text-gray-600'}`}>
+           <div className="flex mb-6 border border-gray-200 rounded-lg p-1 bg-gray-100 max-w-3xl overflow-x-auto">
+              <button type="button" onClick={() => handleModeChange('order')} className={`flex-1 min-w-[90px] py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'order' ? 'bg-white text-pink-600 shadow' : 'text-gray-600'}`}>
                   Buat Order
               </button>
-              <button type="button" onClick={() => handleModeChange('simulation')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'simulation' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
+              <button type="button" onClick={() => handleModeChange('simulation')} className={`flex-1 min-w-[110px] py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'simulation' ? 'bg-white text-blue-600 shadow' : 'text-gray-600'}`}>
                   Simulasi Harga
               </button>
+              <button type="button" onClick={() => handleModeChange('markup')} className={`flex-1 min-w-[110px] py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'markup' ? 'bg-white text-emerald-600 shadow' : 'text-gray-600'}`}>
+                  Nota Markup
+              </button>
               {canAccessLegacyInput && (
-                 <button type="button" onClick={() => handleModeChange('legacy')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'legacy' ? 'bg-white text-amber-600 shadow' : 'text-gray-600'}`}>
+                 <button type="button" onClick={() => handleModeChange('legacy')} className={`flex-1 min-w-[100px] py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'legacy' ? 'bg-white text-amber-600 shadow' : 'text-gray-600'}`}>
                     Piutang Lama
                 </button>
               )}
-              <button type="button" onClick={() => handleModeChange('prompt')} className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'prompt' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>
+              <button type="button" onClick={() => handleModeChange('prompt')} className={`flex-1 min-w-[130px] py-2 text-sm font-semibold rounded-md transition-all duration-300 ${mode === 'prompt' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>
                   Prompt Generator
               </button>
           </div>
@@ -1138,6 +1143,15 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
                 </button>
               </div>
             </div>
+          ) : mode === 'markup' ? (
+            <MarkupInvoice
+              allOrders={allOrders}
+              unprocessedOrders={unprocessedOrders}
+              products={products}
+              categories={categories}
+              finishings={finishings}
+              customers={customers}
+            />
           ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1353,6 +1367,44 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
                       <p>Silakan isi data di sebelah kiri dan klik tombol "Generate Prompt" untuk melihat hasilnya di sini.</p>
                     </div>
                   )}
+                </div>
+              </div>
+          ) : mode === 'markup' ? (
+              <div className="flex flex-col h-full space-y-4">
+                <div className="border-b pb-3 flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                    <span className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg mr-2">
+                      <TagIcon className="h-5 w-5" />
+                    </span>
+                    Nota Markup Reseller
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                    Client-Side
+                  </span>
+                </div>
+                
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 space-y-3.5 text-sm text-emerald-950">
+                  <div className="flex items-start">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center font-bold text-xs mr-2.5 mt-0.5">1</span>
+                    <p><b>Pencarian Instan:</b> Masukkan nomor nota asli reseller (contoh: <span className="font-mono bg-white px-1.5 py-0.5 rounded border border-emerald-300 font-bold">INV-12345</span>). Data diambil langsung dari memori tanpa reload ke database.</p>
+                  </div>
+                  <div className="flex items-start">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center font-bold text-xs mr-2.5 mt-0.5">2</span>
+                    <p><b>100% Aman & Bersih:</b> Transaksi dan pembukuan Nala Media di Database tetap mencatat harga asli reseller (omzet, kas, dan piutang tidak terpengaruh).</p>
+                  </div>
+                  <div className="flex items-start">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center font-bold text-xs mr-2.5 mt-0.5">3</span>
+                    <p><b>Ganti Nama Klien:</b> Nama pembeli di nota cetak dapat langsung diganti dengan nama klien akhir yang diminta reseller.</p>
+                  </div>
+                  <div className="flex items-start">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center font-bold text-xs mr-2.5 mt-0.5">4</span>
+                    <p><b>Cetak & Simpan:</b> Sesuaikan harga satuan/subtotal baru atau gunakan tombol persentase (<b>+20%</b>, <b>+30%</b>, <b>+50%</b>), lalu cetak Struk Thermal (80mm), Faktur Nota (A4), atau Simpan PDF.</p>
+                  </div>
+                </div>
+
+                <div className="bg-white border rounded-xl p-4 text-xs text-gray-600 shadow-sm space-y-1">
+                  <p className="font-bold text-gray-800">💡 Alur Kerja Cepat Kasir:</p>
+                  <p>Cari No. Nota ➔ Klik Edit ➔ Naikkan Harga Satuan / Subtotal ➔ Klik Cetak Struk atau Simpan PDF.</p>
                 </div>
               </div>
           ) : mode === 'simulation' ? (

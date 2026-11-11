@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem, type LegacyReceivable } from '../types';
-import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon } from './Icons';
+import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon, ClipboardIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -840,6 +840,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [receivableNotifications, setReceivableNotifications] = useState<NotificationItem[]>([]);
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const notificationRef = useRef<HTMLDivElement>(null);
+  const [copyToast, setCopyToast] = useState<{ message: string; phone?: string; customer?: string } | null>(null);
 
   // Default filter: 30 hari terakhir & status Belum Lunas
   const defaultStartDate = useMemo(() => {
@@ -1588,16 +1589,15 @@ const Receivables: React.FC<ReceivablesProps> = ({
   };
 
 
-  const handleSendWhatsApp = (order: ReceivableItem) => {
+  const buildWhatsAppMessage = (order: ReceivableItem) => {
     const fullOrder = ordersMap.get(order.id);
     const customerData = customers.find(c => c.name === order.customer);
 
-    if (!fullOrder || !customerData || !customerData.contact) {
-        alert("Informasi pelanggan atau order tidak lengkap untuk mengirim WhatsApp.");
-        return;
+    if (!fullOrder) {
+        return null;
     }
 
-    let phone = customerData.contact.replace(/\D/g, '');
+    let phone = customerData?.contact ? customerData.contact.replace(/\D/g, '') : '';
     if (phone.startsWith('0')) {
         phone = '62' + phone.substring(1);
     }
@@ -1639,7 +1639,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
     const notaInfo = [
         `No Nota  : *${order.id}*`,
         `Tanggal  : ${new Date(fullOrder.orderDate).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' })}`,
-        `Kasir    : -`,
+        `Kasir    : Admin`,
         `Pelanggan: ${order.customer}`
     ].join('\n');
 
@@ -1672,7 +1672,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         `Sisa     : *${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(remainingAmount)}*`
     ].join('\n');
     
-    const thankYou = `Terima kasih!`;
+    const thankYou = `Terima kasih atas pesanannya!`;
 
     const message = [
         storeInfo,
@@ -1686,8 +1686,134 @@ const Receivables: React.FC<ReceivablesProps> = ({
         thankYou
     ].join('\n');
 
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://api.whatsapp.com/send/?phone=${phone}&text=${encodedMessage}`;
+    return { message, phone, customerName: order.customer, contact: customerData?.contact };
+  };
+
+  const handleCopyWhatsApp = (order: ReceivableItem) => {
+    const res = buildWhatsAppMessage(order);
+    if (!res) {
+        alert("Detail order tidak ditemukan.");
+        return;
+    }
+
+    navigator.clipboard.writeText(res.message)
+      .then(() => {
+        setCopyToast({
+            message: `Teks nota ${order.id} berhasil disalin! Silakan beralih ke tab WhatsApp Web dan tekan Ctrl+V (Paste) di chat pelanggan.`,
+            phone: res.contact || res.phone,
+            customer: res.customerName
+        });
+        setTimeout(() => setCopyToast(null), 6000);
+      })
+      .catch((err) => {
+        console.error("Gagal menyalin teks: ", err);
+        alert("Gagal menyalin ke clipboard.");
+      });
+
+    setActionsMenu(null);
+  };
+
+  const handleCopyOrderInfo = (order: ReceivableItem) => {
+    const fullOrder = ordersMap.get(order.id);
+    const customerData = customers.find(c => c.name === order.customer);
+
+    if (!fullOrder) {
+      alert("Detail order tidak ditemukan.");
+      return;
+    }
+
+    // Format rincian item
+    const itemsList = fullOrder.orderItems.map((item, idx) => {
+      const product = products.find(p => p.id === item.productId);
+      const category = categories.find(c => c.name === product?.category);
+      const isArea = category?.unitType === 'Per Luas';
+      const sizeStr = isArea && parseFloat(item.length) > 0 && parseFloat(item.width) > 0 ? ` (${item.length}x${item.width}m)` : '';
+      const name = item.description || product?.name || 'Item Pesanan';
+      return `  ${idx + 1}. ${name}${sizeStr} - ${item.qty} Pcs`;
+    }).join('\n');
+
+    // Status Produksi & Keterangan
+    let statusProduksiText = `*${order.productionStatus}*`;
+    let statusKeterangan = '';
+
+    switch (order.productionStatus) {
+      case 'Siap Ambil':
+        statusProduksiText = '✅ *SIAP DIAMBIL*';
+        statusKeterangan = `Pesanan Anda sudah selesai diproses dan siap diambil di workshop Nala Media:\n📍 *Jl. Prof. Moh. Yamin, Cerbonan, Karanganyar (Timur Stadion 45)*\n🕒 Jam Buka: 08.00 - 24.00 WIB\n\nJika ingin diambil oleh kurir/ojol atau ada pertanyaan, silakan hubungi kami.`;
+        break;
+      case 'Proses Cetak':
+        statusProduksiText = '⚙️ *PROSES CETAK & FINISHING*';
+        statusKeterangan = `Pesanan Anda saat ini sedang dalam proses cetak & finishing di workshop kami. Kami akan infokan kembali begitu pesanan selesai dan siap diambil.`;
+        break;
+      case 'Dalam Antrian':
+        statusProduksiText = '⏳ *DALAM ANTRIAN CETAK*';
+        statusKeterangan = `Pesanan Anda sudah masuk dalam antrian cetak dan akan segera kami proses sesuai jadwal kerja.`;
+        break;
+      case 'Telah Dikirim':
+        statusProduksiText = '📦 *TELAH DIKIRIM / DISERAHKAN*';
+        statusKeterangan = `Pesanan Anda sudah diserahkan / dikirimkan. Terima kasih banyak telah mempercayakan kebutuhan cetak Anda di Nala Media!`;
+        break;
+      default:
+        statusProduksiText = `*${order.productionStatus}*`;
+        statusKeterangan = `Untuk info lebih lanjut silakan tanyakan kepada Admin kami.`;
+        break;
+    }
+
+    // Status Pembayaran
+    const totalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+    const remainingAmount = order.amount - (order.discount || 0) - totalPaid;
+    let paymentStatusText = '';
+    if (remainingAmount <= 0) {
+      paymentStatusText = '*LUNAS* ✅';
+    } else {
+      paymentStatusText = `*Belum Lunas* (Sisa Tagihan: *${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(remainingAmount)}*)`;
+    }
+
+    const tglOrder = new Date(fullOrder.orderDate).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const divider = '--------------------------------';
+
+    const message = [
+      `Halo Kak *${order.customer}*,`,
+      ``,
+      `Update pesanan Anda di *Nala Media Digital Printing*:`,
+      divider,
+      `No. Nota    : *${order.id}*`,
+      `Tgl Order   : ${tglOrder}`,
+      `Rincian     :\n${itemsList}`,
+      `Status      : ${statusProduksiText}`,
+      `Pembayaran  : ${paymentStatusText}`,
+      divider,
+      statusKeterangan,
+      ``,
+      `Terima kasih! 🙏`
+    ].join('\n');
+
+    navigator.clipboard.writeText(message)
+      .then(() => {
+        setCopyToast({
+          message: `Info order nota ${order.id} untuk ${order.customer} berhasil disalin! Silakan paste (Ctrl+V) di chat WhatsApp pelanggan.`,
+          phone: customerData?.contact || undefined,
+          customer: order.customer
+        });
+        setTimeout(() => setCopyToast(null), 6000);
+      })
+      .catch((err) => {
+        console.error("Gagal menyalin teks: ", err);
+        alert("Gagal menyalin info order ke clipboard.");
+      });
+
+    setActionsMenu(null);
+  };
+
+  const handleSendWhatsApp = (order: ReceivableItem) => {
+    const res = buildWhatsAppMessage(order);
+    if (!res || !res.phone) {
+        alert("Informasi pelanggan atau nomor telepon tidak lengkap untuk membuka WhatsApp.");
+        return;
+    }
+
+    const encodedMessage = encodeURIComponent(res.message);
+    const whatsappUrl = `https://api.whatsapp.com/send/?phone=${res.phone}&text=${encodedMessage}`;
 
     window.open(whatsappUrl, '_blank');
     setActionsMenu(null);
@@ -2408,7 +2534,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
                                   <div className="py-1" role="none">
                                       <a href="#" onClick={(e) => { e.preventDefault(); handlePrintReceipt(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Cetak Struk</a>
                                       <a href="#" onClick={(e) => { e.preventDefault(); handlePrintDotMatrixNota(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Cetak Nota (dot matrix)</a>
-                                      <a href="#" onClick={(e) => { e.preventDefault(); handleSendWhatsApp(item); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Kirim Whatsapp</a>
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handleCopyWhatsApp(item); }} className="text-emerald-700 font-semibold block px-4 py-2 text-sm hover:bg-emerald-50 flex items-center" role="menuitem">
+                                          <ClipboardIcon className="h-4 w-4 mr-2 text-emerald-600" />
+                                          Salin Pesan WhatsApp
+                                      </a>
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handleCopyOrderInfo(item); }} className="text-blue-700 font-semibold block px-4 py-2 text-sm hover:bg-blue-50 flex items-center" role="menuitem">
+                                          <BellIcon className="h-4 w-4 mr-2 text-blue-600" />
+                                          Salin Info Order
+                                      </a>
+                                      <a href="#" onClick={(e) => { e.preventDefault(); handleSendWhatsApp(item); }} className="text-gray-500 block px-4 py-1.5 text-xs hover:bg-gray-100" role="menuitem">
+                                          Buka WhatsApp (Tab Baru)
+                                      </a>
                                       <a href="#" onClick={(e) => { e.preventDefault(); handlePreviewInvoice(item); setActionsMenu(null); }} className="text-gray-700 block px-4 py-2 text-sm hover:bg-gray-100" role="menuitem">Lihat & Cetak Invoice</a>
                                   </div>
                               </div>
@@ -2481,6 +2617,29 @@ const Receivables: React.FC<ReceivablesProps> = ({
             onClose={() => setBulkDueDateModalOpen(false)}
             onConfirm={handleConfirmBulkDueDateUpdate}
         />
+    )}
+    {copyToast && (
+      <div className="fixed bottom-6 right-6 z-50 max-w-md bg-emerald-900 text-white p-4 rounded-2xl shadow-2xl border-2 border-emerald-400 flex items-start space-x-3">
+        <div className="p-2 bg-emerald-700 rounded-xl flex-shrink-0 mt-0.5">
+          <CheckIcon className="h-5 w-5 text-emerald-200" />
+        </div>
+        <div className="flex-1 text-sm">
+          <p className="font-bold text-white text-sm">Pesan Berhasil Disalin ke Clipboard!</p>
+          <p className="mt-1 text-xs text-emerald-100 leading-relaxed">{copyToast.message}</p>
+          {copyToast.phone && (
+            <p className="mt-2 text-xs text-emerald-200 bg-black/20 px-2 py-1 rounded inline-block font-mono">
+              No. Kontak: <b>{copyToast.phone}</b> ({copyToast.customer})
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => setCopyToast(null)}
+          className="text-emerald-300 hover:text-white text-lg font-bold leading-none p-1"
+          title="Tutup"
+        >
+          &times;
+        </button>
+      </div>
     )}
     </>
   );
