@@ -3,7 +3,7 @@ import React from 'react';
 import { type MenuItem } from './types';
 import { 
   HomeIcon, ShoppingCartIcon, CreditCardIcon, ReceiptTaxIcon, CircleStackIcon, CubeIcon, 
-  WrenchScrewdriverIcon, ChartBarIcon, Cog6ToothIcon, TableCellsIcon, CalendarDaysIcon
+  WrenchScrewdriverIcon, ChartBarIcon, Cog6ToothIcon, TableCellsIcon, CalendarDaysIcon, Squares2X2Icon
 } from './components/Icons';
 
 export const MENU_ITEMS: MenuItem[] = [
@@ -18,6 +18,7 @@ export const MENU_ITEMS: MenuItem[] = [
   },
   { key: 'sales', label: 'Order', icon: <ShoppingCartIcon /> },
   { key: 'production', label: 'Produksi / Status Order', icon: <WrenchScrewdriverIcon /> },
+  { key: 'printLayout', label: 'Layout Otomatis', icon: <Squares2X2Icon /> },
   { key: 'receivables', label: 'Pembayaran', icon: <CreditCardIcon /> },
   { key: 'expenses', label: 'Pengeluaran', icon: <ReceiptTaxIcon /> },
   { key: 'inventory', label: 'Stok / Inventori', icon: <CubeIcon /> },

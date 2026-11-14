@@ -10,6 +10,7 @@ export type MenuKey =
   | 'managementData'
   | 'inventory'
   | 'production'
+  | 'printLayout'
   | 'reports'
   | 'settings';
 
@@ -342,4 +343,73 @@ export interface ReportsProps {
   onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
   onUpdateDebt: (data: DebtItem) => void;
   onDeleteDebt: (id: number) => void;
+}
+
+// --- Print Layout Template Generator Types ---
+export type LayoutUnit = 'mm' | 'cm' | 'm';
+export type MediaMode = 'sheet' | 'roll';
+export type NestingAlgorithm = 'bestFit' | 'guillotineRow';
+export type ObjectShape = 'rectangle' | 'circle' | 'ellipse';
+export type EfficiencySelectionMode = 'all' | 'smart';
+
+export interface FinishingSpaceRule {
+  finishingName: string;
+  extraWidthMm: number;
+  extraHeightMm: number;
+  note?: string;
+}
+
+export interface LayoutObjectSpec {
+  id: string;
+  label: string;
+  shape: ObjectShape;
+  baseWidthMm: number;
+  baseHeightMm: number;
+  extraWidthMm: number;
+  extraHeightMm: number;
+  widthMm: number;
+  heightMm: number;
+  finishingName?: string;
+  qty: number;
+  allowRotate: boolean;
+  color: string;
+  sourceOrderId?: string;
+  sourceCustomer?: string;
+  materialName?: string;
+}
+
+export interface PlacedLayoutItem {
+  instanceId: string;
+  specId: string;
+  copyIndex: number;
+  label: string;
+  shape: ObjectShape;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotated: boolean;
+  color: string;
+  baseWidthMm?: number;
+  baseHeightMm?: number;
+  finishingName?: string;
+  sourceOrderId?: string;
+  sourceCustomer?: string;
+}
+
+export interface LayoutPage {
+  pageNumber: number;
+  widthMm: number;
+  heightMm: number;
+  items: PlacedLayoutItem[];
+}
+
+export interface DeferredObjectItem {
+  specId: string;
+  label: string;
+  shape: ObjectShape;
+  widthMm: number;
+  heightMm: number;
+  qty: number;
+  reason: string;
 }

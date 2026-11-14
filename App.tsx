@@ -15,9 +15,11 @@ import Settings from './components/Settings';
 import Header from './components/Header';
 import Payroll from './components/Payroll';
 import Login from './components/Login';
+import PrintLayout from './components/PrintLayout';
+import { DEFAULT_FINISHING_SPACE_RULES } from './components/printLayoutUtils';
 import { supabase } from './supabaseClient';
 // @FIX: The 'Session' type is not exported in older versions of '@supabase/supabase-js'. It's removed to prevent type errors.
-import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem, CardData } from './types';
+import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem, type FinishingSpaceRule, CardData } from './types';
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
 import { ShoppingCartIcon, ExclamationTriangleIcon, CreditCardIcon } from './components/Icons';
 
@@ -25,8 +27,8 @@ console.log("Build: Script is being parsed and component is about to be created.
 
 const DEFAULT_MENU_PERMISSIONS: MenuPermissions = {
     Kasir: ["dashboard", "dashboard/penjualan", "sales", "receivables", "reports", "reports/dataPiutangLama"],
-    Office: ["dashboard", "dashboard/penjualan", "dashboard/produksi", "sales", "receivables", "expenses", "payroll", "payroll/attendance", "payroll/summary", "masterData", "masterData/products", "masterData/categories", "masterData/finishings", "masterData/customers", "masterData/suppliers", "masterData/karyawan", "reports", "reports/sales", "reports/receivables", "reports/inventory", "reports/assetsDebts", "reports/dataPenjualanLama", "reports/finalRecap", "reports/dataPiutangLama", "reports/categorySales"],
-    Produksi: ["dashboard", "dashboard/produksi", "production", "inventory"],
+    Office: ["dashboard", "dashboard/penjualan", "dashboard/produksi", "sales", "printLayout", "receivables", "expenses", "payroll", "payroll/attendance", "payroll/summary", "masterData", "masterData/products", "masterData/categories", "masterData/finishings", "masterData/customers", "masterData/suppliers", "masterData/karyawan", "reports", "reports/sales", "reports/receivables", "reports/inventory", "reports/assetsDebts", "reports/dataPenjualanLama", "reports/finalRecap", "reports/dataPiutangLama", "reports/categorySales"],
+    Produksi: ["dashboard", "dashboard/produksi", "production", "printLayout", "inventory"],
     Admin: ALL_PERMISSIONS_LIST
 };
 
@@ -122,6 +124,18 @@ const App: React.FC = () => {
   const [notePrefix, setNotePrefix] = useState('INV-');
   const [initialCash, setInitialCash] = useState<number>(0);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
+  const [finishingSpaceRules, setFinishingSpaceRules] = useState<FinishingSpaceRule[]>(() => {
+    try {
+      const saved = localStorage.getItem('nala_finishing_space_rules');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // Ignore storage error
+    }
+    return DEFAULT_FINISHING_SPACE_RULES;
+  });
 
 
   const clearAllData = useCallback(() => {
@@ -232,6 +246,7 @@ const App: React.FC = () => {
     const storeInfoSetting = settings.find((s:any) => s.key === 'storeInfo');
     const initialCashSetting = settings.find((s:any) => s.key === 'initialCash');
     const paymentMethodsSetting = settings.find((s:any) => s.key === 'paymentMethods');
+    const finishingSpaceRulesSetting = settings.find((s:any) => s.key === 'finishingSpaceRules');
 
     if (menuPermsSetting && menuPermsSetting.value) {
         const dbPermissions = menuPermsSetting.value as MenuPermissions;
@@ -244,6 +259,14 @@ const App: React.FC = () => {
     if (storeInfoSetting) setStoreInfo(storeInfoSetting.value);
     if (paymentMethodsSetting && Array.isArray(paymentMethodsSetting.value)) {
         setPaymentMethods(paymentMethodsSetting.value);
+    }
+    if (finishingSpaceRulesSetting && Array.isArray(finishingSpaceRulesSetting.value)) {
+        setFinishingSpaceRules(finishingSpaceRulesSetting.value);
+        try {
+            localStorage.setItem('nala_finishing_space_rules', JSON.stringify(finishingSpaceRulesSetting.value));
+        } catch {
+            // Ignore storage error
+        }
     }
     if (initialCashSetting && typeof initialCashSetting.value === 'number') {
         setInitialCash(initialCashSetting.value);
@@ -422,6 +445,12 @@ const App: React.FC = () => {
                             break;
                         case 'storeInfo': setStoreInfo(value); break;
                         case 'paymentMethods': setPaymentMethods(Array.isArray(value) ? value : DEFAULT_PAYMENT_METHODS); break;
+                        case 'finishingSpaceRules':
+                            if (Array.isArray(value)) {
+                                setFinishingSpaceRules(value);
+                                try { localStorage.setItem('nala_finishing_space_rules', JSON.stringify(value)); } catch {}
+                            }
+                            break;
                         case 'initialCash': setInitialCash(typeof value === 'number' ? value : 0); break;
                     }
                 }
@@ -603,6 +632,24 @@ const App: React.FC = () => {
     } else {
         // State will be updated by real-time subscription
         alert("Kas awal berhasil diperbarui.");
+    }
+  }, []);
+
+  const handleSaveFinishingSpaceRules = useCallback(async (newRules: FinishingSpaceRule[]) => {
+    setFinishingSpaceRules(newRules);
+    try {
+      localStorage.setItem('nala_finishing_space_rules', JSON.stringify(newRules));
+    } catch {
+      // Ignore storage error
+    }
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: 'finishingSpaceRules', value: newRules }, { onConflict: 'key' });
+    if (error) {
+      console.error("Error saving finishing space rules:", error);
+      alert(`Aturan tersimpan secara lokal, namun gagal sinkron ke server: ${error.message}`);
+    } else {
+      alert("Aturan penambahan space finishing berhasil disimpan.");
     }
   }, []);
 
@@ -1088,6 +1135,7 @@ const App: React.FC = () => {
       case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
       case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
       case 'production': return <Production boardData={boardData} allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} onProductionMove={handleProductionMove} onDeliverOrder={handleDeliverOrder} onCancelQueue={handleCancelQueue} />;
+      case 'printLayout': return <PrintLayout allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} finishings={finishings} storeInfo={storeInfo} finishingSpaceRules={finishingSpaceRules} onSaveFinishingSpaceRules={handleSaveFinishingSpaceRules} />;
       case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onUpdateAttendance={handleUpdateAttendance} onDeleteAttendance={handleDeleteAttendance} onBulkDeleteAttendance={handleBulkDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} onDeletePayrollPermanently={handleDeletePayrollPermanently} />;
       case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} onAddProduct={handleAddProduct} onAddCategory={handleAddCategory} onAddFinishing={handleAddFinishing} onAddCustomer={handleAddCustomer} onAddSupplier={handleAddSupplier} onAddEmployee={handleAddEmployee} />;
       case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
