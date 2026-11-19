@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem, type LegacyReceivable } from '../types';
-import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon, ClipboardIcon } from './Icons';
+import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type ExpenseMetadata, type SupplierBill, type BankInstallment, type PrivateExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem, type LegacyReceivable, type CashDrawerState, type CashDrawerLog, type CashTransferRecord } from '../types';
+import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon, ClipboardIcon, CalendarDaysIcon, ArrowUpTrayIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -10,8 +10,18 @@ type DisplayReceivable = ReceivableItem & { isUnprocessed?: boolean; isLegacy?: 
 
 // --- START: Reusable Components ---
 
+const getLocalDateString = (date: Date = new Date()): string => {
+  return date.toISOString().substring(0, 10);
+};
+
 const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
 const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
+const formatDateTime = (isoString: string) => {
+  if (!isoString) return '-';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return isoString;
+  return d.toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
 
 interface StatCardProps {
   icon: React.ReactElement<{ className?: string }>;
@@ -99,7 +109,7 @@ const PaymentModal: React.FC<{
   const [discountPercent, setDiscountPercent] = useState<string>('');
   const [isDiscountLocked, setIsDiscountLocked] = useState(false);
 
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
+  const [paymentDate, setPaymentDate] = useState(getLocalDateString());
   const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
   const [editedItems, setEditedItems] = useState<OrderItemData[] | null>(fullOrder?.orderItems || null);
 
@@ -482,7 +492,7 @@ const BulkPaymentModal: React.FC<{
   onClose: () => void;
   onConfirmBulkPayment: (paymentDate: string, paymentMethodId: string) => void;
 }> = ({ orders, paymentMethods, onClose, onConfirmBulkPayment }) => {
-    const [paymentDate, setPaymentDate] = useState(new Date().toISOString().substring(0, 10));
+    const [paymentDate, setPaymentDate] = useState(getLocalDateString());
     const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
     
     const totalAmount = orders.reduce((sum, order) => {
@@ -538,18 +548,21 @@ const BulkPaymentModal: React.FC<{
 
 const InitialCashModal: React.FC<{
   currentAmount: number;
+  currentStartDate: string;
   onClose: () => void;
-  onSave: (amount: number) => void;
-}> = ({ currentAmount, onClose, onSave }) => {
+  onSave: (amount: number, periodStartDate: string, notes?: string) => void;
+}> = ({ currentAmount, currentStartDate, onClose, onSave }) => {
   const [amount, setAmount] = useState(currentAmount.toString());
+  const [periodStartDate, setPeriodStartDate] = useState(currentStartDate);
+  const [notes, setNotes] = useState('');
 
   const handleSave = () => {
     const numericAmount = parseFloat(amount);
-    if (!isNaN(numericAmount)) {
-      onSave(numericAmount);
+    if (!isNaN(numericAmount) && numericAmount >= 0 && periodStartDate) {
+      onSave(numericAmount, periodStartDate, notes.trim() || undefined);
       onClose();
     } else {
-      alert('Masukkan jumlah yang valid.');
+      alert('Masukkan jumlah kas awal dan tanggal mulai periode yang valid.');
     }
   };
 
@@ -557,20 +570,47 @@ const InitialCashModal: React.FC<{
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center border-b pb-3 mb-4">
-          <h3 className="text-xl font-bold text-gray-800">Atur Kas Awal Harian</h3>
+          <h3 className="text-xl font-bold text-gray-800">Atur Kas Awal Laci</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
         </div>
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">Masukkan jumlah modal atau uang kembalian yang tersedia di laci pada awal hari. Nilai ini akan digunakan untuk perhitungan kas akhir hari ini.</p>
+          <p className="text-sm text-gray-600">
+            Atur nominal modal/uang kembalian di laci pada awal periode. Kas laci akan terus berakumulasi antar hari hingga Anda menekan tombol <strong>Setor Dana</strong>.
+          </p>
           <div>
-            <label htmlFor="initial-cash" className="block text-sm font-medium text-gray-700">Jumlah Kas Awal (Rp)</label>
+            <label htmlFor="initial-cash" className="block text-sm font-medium text-gray-700">Jumlah Kas Awal Laci (Rp)</label>
             <input
               type="number"
               id="initial-cash"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               className="mt-1 w-full p-2 border border-gray-300 rounded-md"
-              placeholder="e.g., 100000"
+              placeholder="e.g., 200000"
+            />
+          </div>
+          <div>
+            <label htmlFor="period-start-date" className="block text-sm font-medium text-gray-700">Mulai Hitung Akumulasi Dari Tanggal</label>
+            <input
+              type="date"
+              id="period-start-date"
+              value={periodStartDate}
+              max={getLocalDateString()}
+              onChange={(e) => setPeriodStartDate(e.target.value)}
+              className="mt-1 w-full p-2 border border-gray-300 rounded-md"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Ubah tanggal ini jika ingin menghitung ulang akumulasi beberapa hari terakhir yang belum disetor.
+            </p>
+          </div>
+          <div>
+            <label htmlFor="initial-cash-notes" className="block text-sm font-medium text-gray-700">Keterangan (Opsional)</label>
+            <input
+              type="text"
+              id="initial-cash-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
+              placeholder="Contoh: Tambah pecahan kembalian dari owner"
             />
           </div>
         </div>
@@ -587,36 +627,526 @@ const InitialCashModal: React.FC<{
   );
 };
 
+// --- START: SETOR KE OWNER MODAL ---
+const DepositCashModal: React.FC<{
+  periodStartDate: string;
+  today: string;
+  openingCash: number;
+  cashInPeriod: number;
+  cashOutPeriod: number;
+  cashTransferNetPeriod: number;
+  expectedCash: number;
+  nonCashTotal: number;
+  cashBreakdown: Record<string, number>;
+  nonCashBreakdown: Record<string, number>;
+  nonCashAccounts: PaymentMethod[];
+  currentUserName?: string;
+  onClose: () => void;
+  onConfirmSetor: (payload: {
+    depositAmount: number;
+    physicalCash?: number;
+    recipient: string;
+    depositToAccountId?: string;
+    depositToAccountName?: string;
+    notes?: string;
+  }) => Promise<void>;
+}> = ({
+  periodStartDate,
+  today,
+  openingCash,
+  cashInPeriod,
+  cashOutPeriod,
+  cashTransferNetPeriod,
+  expectedCash,
+  nonCashTotal,
+  nonCashBreakdown,
+  nonCashAccounts,
+  currentUserName,
+  onClose,
+  onConfirmSetor,
+}) => {
+  const [physicalCashInput, setPhysicalCashInput] = useState('');
+  const [depositAmountInput, setDepositAmountInput] = useState(Math.max(0, expectedCash).toString());
+  const [recipient, setRecipient] = useState('Owner');
+  const [depositToAccountId, setDepositToAccountId] = useState('');
+  const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const hasPhysicalCash = physicalCashInput.trim() !== '' && !isNaN(parseFloat(physicalCashInput));
+  const physicalCash = hasPhysicalCash ? parseFloat(physicalCashInput) : undefined;
+  const discrepancy = physicalCash !== undefined ? physicalCash - expectedCash : undefined;
+
+  const baseCashInDrawer = physicalCash !== undefined ? physicalCash : expectedCash;
+  const depositAmount = parseFloat(depositAmountInput) || 0;
+  const remainingCash = baseCashInDrawer - depositAmount;
+
+  const handleQuickLeave = (keepAmount: number) => {
+    const suggested = Math.max(0, baseCashInDrawer - keepAmount);
+    setDepositAmountInput(suggested.toString());
+  };
+
+  const handleSubmit = async () => {
+    if (isNaN(depositAmount) || depositAmount < 0) {
+      alert('Nominal setor tidak valid.');
+      return;
+    }
+    if (remainingCash < 0) {
+      alert('Nominal setor melebihi saldo kas yang tersedia di laci.');
+      return;
+    }
+    if (!recipient.trim()) {
+      alert('Nama penerima setor harus diisi.');
+      return;
+    }
+    const destAccount = nonCashAccounts.find(a => a.id === depositToAccountId);
+    setIsSubmitting(true);
+    try {
+      await onConfirmSetor({
+        depositAmount,
+        physicalCash,
+        recipient: recipient.trim(),
+        depositToAccountId: destAccount?.id,
+        depositToAccountName: destAccount?.name,
+        notes: notes.trim() || undefined,
+      });
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center border-b pb-3 mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Setor Dana Kas Laci</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Periode akumulasi: <strong>{formatDate(periodStartDate)}</strong> s/d <strong>{formatDate(today)}</strong>
+              {currentUserName ? ` • Operator: ${currentUserName}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+          {/* System Breakdown */}
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-2 text-sm">
+            <div className="flex justify-between text-gray-700">
+              <span>Kas Awal Periode</span>
+              <span className="font-semibold">{formatCurrency(openingCash)}</span>
+            </div>
+            <div className="flex justify-between text-emerald-700">
+              <span>(+) Pemasukan Tunai Masuk Laci</span>
+              <span className="font-semibold">+ {formatCurrency(cashInPeriod)}</span>
+            </div>
+            <div className="flex justify-between text-rose-700">
+              <span>(-) Pengeluaran dari Kas Laci</span>
+              <span className="font-semibold">- {formatCurrency(cashOutPeriod)}</span>
+            </div>
+            {cashTransferNetPeriod !== 0 && (
+              <div className={`flex justify-between ${cashTransferNetPeriod >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>
+                <span>({cashTransferNetPeriod >= 0 ? '+' : '-'}) Mutasi Laci / Pindah Akun</span>
+                <span className="font-semibold">
+                  {cashTransferNetPeriod >= 0 ? `+ ${formatCurrency(cashTransferNetPeriod)}` : `- ${formatCurrency(Math.abs(cashTransferNetPeriod))}`}
+                </span>
+              </div>
+            )}
+            <div className="border-t border-purple-200 pt-2 flex justify-between items-center">
+              <span className="font-bold text-purple-900">Saldo Seharusnya di Laci (Sistem)</span>
+              <span className="text-xl font-bold text-purple-700">{formatCurrency(expectedCash)}</span>
+            </div>
+          </div>
+
+          {nonCashTotal > 0 && (
+            <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 text-xs text-sky-900">
+              <div className="flex justify-between font-semibold mb-1">
+                <span>Info Pemasukan Non-Tunai Periode Ini (Tidak Masuk Laci Fisik):</span>
+                <span>{formatCurrency(nonCashTotal)}</span>
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px] text-sky-700">
+                {Object.entries(nonCashBreakdown).map(([name, amt]) => (
+                  <span key={name} className="bg-white/80 px-2 py-0.5 rounded border border-sky-200">
+                    {name}: <strong>{formatCurrency(amt as number)}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Physical Cash Count */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Hitung Uang Fisik di Laci (Opsional)
+              </label>
+              <input
+                type="number"
+                value={physicalCashInput}
+                onChange={(e) => setPhysicalCashInput(e.target.value)}
+                placeholder={`Default sistem: ${expectedCash}`}
+                className="mt-1 w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-pink-500 focus:border-pink-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">Isi jika ingin mencatat selisih kas fisik vs sistem.</p>
+            </div>
+
+            <div className="flex flex-col justify-center">
+              {discrepancy !== undefined ? (
+                <div className={`p-3 rounded-lg border text-sm ${
+                  discrepancy === 0
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : discrepancy > 0
+                      ? 'bg-blue-50 border-blue-200 text-blue-800'
+                      : 'bg-red-50 border-red-200 text-red-800'
+                }`}>
+                  <p className="text-xs font-medium">Selisih (Fisik - Sistem)</p>
+                  <p className="text-lg font-bold">
+                    {discrepancy === 0
+                      ? 'Cocok (Rp 0)'
+                      : `${discrepancy > 0 ? '+' : ''}${formatCurrency(discrepancy)}`}
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-600">
+                  Tanpa input uang fisik, sistem menganggap uang fisik sesuai saldo sistem ({formatCurrency(expectedCash)}).
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Deposit Amount */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Nominal Dana Disetor (Rp)</label>
+            <input
+              type="number"
+              value={depositAmountInput}
+              onChange={(e) => setDepositAmountInput(e.target.value)}
+              className="mt-1 w-full p-2.5 border border-gray-300 rounded-lg text-lg font-bold text-gray-800 focus:ring-pink-500 focus:border-pink-500"
+            />
+            <div className="flex flex-wrap gap-2 mt-2">
+              <button type="button" onClick={() => handleQuickLeave(0)} className="px-2.5 py-1 text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md border">
+                Setor Semua
+              </button>
+              <button type="button" onClick={() => handleQuickLeave(100000)} className="px-2.5 py-1 text-xs font-semibold bg-pink-50 hover:bg-pink-100 text-pink-700 rounded-md border border-pink-200">
+                Sisakan Rp 100.000
+              </button>
+              <button type="button" onClick={() => handleQuickLeave(200000)} className="px-2.5 py-1 text-xs font-semibold bg-pink-50 hover:bg-pink-100 text-pink-700 rounded-md border border-pink-200">
+                Sisakan Rp 200.000
+              </button>
+              <button type="button" onClick={() => handleQuickLeave(500000)} className="px-2.5 py-1 text-xs font-semibold bg-pink-50 hover:bg-pink-100 text-pink-700 rounded-md border border-pink-200">
+                Sisakan Rp 500.000
+              </button>
+            </div>
+          </div>
+
+          <div className={`p-3 rounded-lg border flex justify-between items-center ${remainingCash < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+            <div>
+              <p className="text-sm font-semibold">Sisa Uang di Laci (Menjadi Kas Awal Periode Baru)</p>
+              <p className="text-xs opacity-80">Uang kembalian/modal yang tetap tinggal di laci kasir.</p>
+            </div>
+            <p className="text-xl font-bold">{formatCurrency(remainingCash)}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Disetor Kepada</label>
+              <input
+                type="text"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
+                placeholder="Owner / Admin Keuangan"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Masuk ke Rekening Mana? (Opsional)</label>
+              <select
+                value={depositToAccountId}
+                onChange={(e) => setDepositToAccountId(e.target.value)}
+                className="mt-1 w-full p-2 border border-gray-300 rounded-md bg-white text-sm"
+              >
+                <option value="">Dipegang Owner / Di Luar Rekening Toko</option>
+                {nonCashAccounts.map(acc => (
+                  <option key={acc.id} value={acc.id}>
+                    Setor ke {acc.name} ({acc.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Catatan Setoran (Opsional)</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
+              placeholder="Contoh: Setoran laci 4 hari / setor tunai ke BCA"
+            />
+          </div>
+        </div>
+
+        <div className="border-t pt-4 mt-5 flex justify-end space-x-3">
+          <button onClick={onClose} disabled={isSubmitting} className="bg-gray-200 text-gray-700 px-5 py-2 rounded-lg font-semibold text-sm hover:bg-gray-300">
+            Batal
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isSubmitting || remainingCash < 0 || depositAmount < 0}
+            className="bg-purple-600 text-white px-5 py-2 rounded-lg font-bold text-sm hover:bg-purple-700 disabled:bg-purple-300"
+          >
+            {isSubmitting ? 'Menyimpan...' : `Konfirmasi Setor (${formatCurrency(depositAmount)})`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+// --- END: SETOR KE OWNER MODAL ---
+
+// --- START: CASH DRAWER HISTORY MODAL ---
+const CashDrawerHistoryModal: React.FC<{
+  logs: CashDrawerLog[];
+  onClose: () => void;
+}> = ({ logs, onClose }) => {
+  const [filterType, setFilterType] = useState<'Semua' | 'Setor' | 'Penyesuaian Kas Awal'>('Semua');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const filteredLogs = useMemo(() => {
+    return logs.filter(l => filterType === 'Semua' || l.type === filterType);
+  }, [logs, filterType]);
+
+  const summary = useMemo(() => {
+    const setorLogs = filteredLogs.filter(l => l.type === 'Setor');
+    return {
+      totalDeposited: setorLogs.reduce((s, l) => s + l.depositAmount, 0),
+      totalDiscrepancy: setorLogs.reduce((s, l) => s + (l.discrepancy || 0), 0),
+      countSetor: setorLogs.length,
+    };
+  }, [filteredLogs]);
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center border-b pb-3 mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Log Kas Laci & Riwayat Setoran</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Rekam jejak setor dana (ke owner / rekening bank) dan penyesuaian kas awal periode.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+            <p className="text-xs text-purple-700">Total Disetor</p>
+            <p className="text-lg font-bold text-purple-800">{formatCurrency(summary.totalDeposited)}</p>
+          </div>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-700">Frekuensi Setor</p>
+            <p className="text-lg font-bold text-blue-800">{summary.countSetor} Kali</p>
+          </div>
+          <div className={`p-3 border rounded-lg ${summary.totalDiscrepancy === 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+            <p className="text-xs">Akumulasi Selisih Fisik</p>
+            <p className="text-lg font-bold">{summary.totalDiscrepancy >= 0 ? `+${formatCurrency(summary.totalDiscrepancy)}` : formatCurrency(summary.totalDiscrepancy)}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex space-x-2">
+            {(['Semua', 'Setor', 'Penyesuaian Kas Awal'] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => setFilterType(t)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                  filterType === t ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-gray-500">Menampilkan {filteredLogs.length} catatan</span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto border rounded-lg">
+          {filteredLogs.length > 0 ? (
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="py-2.5 px-3 text-left text-xs font-semibold text-gray-600">Waktu</th>
+                  <th className="py-2.5 px-3 text-left text-xs font-semibold text-gray-600">Tipe & Periode</th>
+                  <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600">Saldo Sistem</th>
+                  <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600">Disetor</th>
+                  <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600">Sisa Laci</th>
+                  <th className="py-2.5 px-3 text-left text-xs font-semibold text-gray-600">Selisih / Penerima</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredLogs.map(log => {
+                  const isExpanded = expandedId === log.id;
+                  return (
+                    <React.Fragment key={log.id}>
+                      <tr
+                        onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                        className="hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="py-2.5 px-3 whitespace-nowrap text-xs text-gray-700">
+                          <div className="font-semibold">{formatDateTime(log.timestamp)}</div>
+                          {log.operator && <div className="text-gray-400">Oleh: {log.operator}</div>}
+                        </td>
+                        <td className="py-2.5 px-3 text-xs">
+                          <span className={`inline-block px-2 py-0.5 rounded-full font-semibold ${
+                            log.type === 'Setor' ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {log.type}
+                          </span>
+                          <div className="text-gray-500 mt-1">
+                            {formatDate(log.periodStartDate)} – {formatDate(log.periodEndDate)}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap text-xs">
+                          <div className="font-semibold text-gray-800">{formatCurrency(log.expectedCash)}</div>
+                          {log.physicalCash !== undefined && (
+                            <div className="text-gray-500">Fisik: {formatCurrency(log.physicalCash)}</div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap font-bold text-purple-700">
+                          {log.type === 'Setor' ? formatCurrency(log.depositAmount) : '-'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap font-semibold text-gray-700">
+                          {formatCurrency(log.remainingCash)}
+                        </td>
+                        <td className="py-2.5 px-3 text-xs">
+                          {log.type === 'Setor' ? (
+                            <>
+                              <div className="font-medium text-gray-700">
+                                Ke: {log.recipient || 'Owner'}
+                                {log.depositToAccountName && (
+                                  <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-semibold">
+                                    → {log.depositToAccountName}
+                                  </span>
+                                )}
+                              </div>
+                              {log.discrepancy !== undefined && log.discrepancy !== 0 && (
+                                <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[11px] font-semibold ${
+                                  log.discrepancy > 0 ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
+                                }`}>
+                                  Selisih: {log.discrepancy > 0 ? '+' : ''}{formatCurrency(log.discrepancy)}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-gray-600">{log.notes || 'Penyesuaian kas awal'}</span>
+                          )}
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-gray-50">
+                          <td colSpan={6} className="px-4 py-3 text-xs text-gray-700 space-y-2">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              <div>Kas Awal: <strong>{formatCurrency(log.openingCash)}</strong></div>
+                              <div>Tunai Masuk: <strong className="text-emerald-700">+{formatCurrency(log.cashInTotal)}</strong></div>
+                              <div>Keluar Laci: <strong className="text-rose-700">-{formatCurrency(log.cashOutTotal)}</strong></div>
+                              <div>Non-Tunai: <strong className="text-sky-700">{formatCurrency(log.nonCashTotal)}</strong></div>
+                            </div>
+                            {log.notes && <p className="text-gray-600">Catatan: <em>{log.notes}</em></p>}
+                            {log.breakdownByMethod && Object.keys(log.breakdownByMethod).length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                {Object.entries(log.breakdownByMethod).map(([m, a]) => (
+                                  <span key={m} className="bg-white border px-2 py-0.5 rounded text-[11px]">
+                                    {m}: <strong>{formatCurrency(a as number)}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div className="text-center py-12 text-gray-500 text-sm">Belum ada log kas atau riwayat setoran.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+// --- END: CASH DRAWER HISTORY MODAL ---
+
 // --- START: NEW SUMMARY MODAL ---
 const SummaryInfoModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
   title: string;
   type: 'payments' | 'receivables' | 'expenses' | 'finalCash' | 'initialCashInfo';
+  onOpenSetor?: () => void;
+  onOpenHistory?: () => void;
+  onOpenInitialCash?: () => void;
   data: {
-    payments?: { customer: string, orderId: string, methodName: string, amount: number }[];
+    payments?: { customer: string, orderId: string, methodName: string, amount: number, isCash?: boolean }[];
     receivables?: (ReceivableItem & { remaining: number })[];
     expenses?: ExpenseItem[];
     finalCashBreakdown?: { [key: string]: number };
+    nonCashBreakdown?: { [key: string]: number };
     finalCashTotal?: number;
+    openingCash?: number;
+    cashInPeriod?: number;
+    cashOutPeriod?: number;
+    cashTransferNetPeriod?: number;
+    nonCashTotal?: number;
+    periodStartDate?: string;
+    periodEndDate?: string;
   };
-}> = ({ isOpen, onClose, title, type, data }) => {
+}> = ({ isOpen, onClose, title, type, data, onOpenSetor, onOpenHistory, onOpenInitialCash }) => {
   if (!isOpen) return null;
 
   const renderContent = () => {
     switch(type) {
       case 'initialCashInfo':
         return (
-          <div className="p-4 bg-amber-50 border-l-4 border-amber-400 text-amber-700">
-            <p className="font-semibold">Informasi Kas Awal</p>
-            <p className="text-sm mt-1">Ini adalah nominal uang saldo awal harian. Masukan sesuai nominal menggunakan tombol (Kas Awal) di dalam menu Pembayaran sesuai nominal di laci untuk kembalian atau pecahan uang, agar akurat dalam menghitung Kas Akhir!!!</p>
+          <div className="space-y-4">
+            <div className="p-4 bg-amber-50 border-l-4 border-amber-400 text-amber-800 rounded-r-lg">
+              <p className="font-semibold">Informasi Kas Awal Periode Laci</p>
+              <p className="text-sm mt-1">
+                Kas Awal sebesar <strong>{formatCurrency(data.openingCash || 0)}</strong> adalah modal/sisa kas di laci sejak tanggal{' '}
+                <strong>{data.periodStartDate ? formatDate(data.periodStartDate) : '-'}</strong>. Nilai ini akan terus berakumulasi dengan transaksi tunai harian sampai Anda menekan tombol <strong>Setor Dana</strong>.
+              </p>
+            </div>
+            <div className="flex justify-end space-x-2">
+              {onOpenHistory && (
+                <button onClick={() => { onClose(); onOpenHistory(); }} className="px-4 py-2 text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg">
+                  Lihat Log Kas & Setoran
+                </button>
+              )}
+              {onOpenInitialCash && (
+                <button onClick={() => { onClose(); onOpenInitialCash(); }} className="px-4 py-2 text-sm font-semibold bg-pink-600 hover:bg-pink-700 text-white rounded-lg">
+                  Ubah Kas Awal
+                </button>
+              )}
+            </div>
           </div>
         );
       case 'payments':
         return (
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left">Pelanggan</th><th className="py-2 px-3 text-left">No Nota</th><th className="py-2 px-3 text-left">Sumber Dana</th><th className="py-2 px-3 text-right">Nominal</th></tr></thead>
-            <tbody className="divide-y">{data.payments?.map((p, i) => (<tr key={i}><td className="py-2 px-3">{p.customer}</td><td className="py-2 px-3">{p.orderId}</td><td className="py-2 px-3">{p.methodName}</td><td className="py-2 px-3 text-right">{formatCurrency(p.amount)}</td></tr>))}</tbody>
+            <tbody className="divide-y">{data.payments?.map((p, i) => (
+              <tr key={i}>
+                <td className="py-2 px-3">{p.customer}</td>
+                <td className="py-2 px-3">{p.orderId}</td>
+                <td className="py-2 px-3">
+                  <span>{p.methodName}</span>
+                  <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded font-semibold ${p.isCash ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>
+                    {p.isCash ? 'Tunai (Laci)' : 'Non-Tunai'}
+                  </span>
+                </td>
+                <td className="py-2 px-3 text-right">{formatCurrency(p.amount)}</td>
+              </tr>
+            ))}</tbody>
           </table>
         );
       case 'receivables':
@@ -627,27 +1157,105 @@ const SummaryInfoModal: React.FC<{
           </table>
         );
       case 'expenses':
-        return (
+        return data.expenses && data.expenses.length > 0 ? (
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50"><tr><th className="py-2 px-3 text-left">Nama</th><th className="py-2 px-3 text-left">Kategori</th><th className="py-2 px-3 text-right">Jumlah</th></tr></thead>
-            <tbody className="divide-y">{data.expenses?.map(e => (<tr key={e.id}><td className="py-2 px-3">{e.name}</td><td className="py-2 px-3">{e.category}</td><td className="py-2 px-3 text-right">{formatCurrency(e.amount)}</td></tr>))}</tbody>
+            <tbody className="divide-y">{data.expenses.map(e => (<tr key={e.id}><td className="py-2 px-3">{e.name}</td><td className="py-2 px-3">{e.category}</td><td className="py-2 px-3 text-right">{formatCurrency(e.amount)}</td></tr>))}</tbody>
           </table>
-        );
+        ) : <p className="text-center text-gray-500 py-8 text-sm">Belum ada pengeluaran dari Kas Laci hari ini.</p>;
       case 'finalCash':
         return (
-          <div>
-            <div className="p-4 bg-pink-50 rounded-lg text-center mb-4">
-              <p className="text-sm text-pink-700">Total Kas Akhir</p>
-              <p className="text-3xl font-bold text-pink-600">{formatCurrency(data.finalCashTotal || 0)}</p>
+          <div className="space-y-4">
+            <div className="p-4 bg-gradient-to-br from-fuchsia-50 to-purple-50 border border-purple-200 rounded-xl text-center">
+              <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+                Akumulasi Periode: {data.periodStartDate ? formatDate(data.periodStartDate) : '-'} s/d {data.periodEndDate ? formatDate(data.periodEndDate) : '-'}
+              </p>
+              <p className="text-3xl font-bold text-purple-700 mt-1">{formatCurrency(data.finalCashTotal || 0)}</p>
+              <p className="text-xs text-purple-600 mt-1">Uang Tunai Seharusnya Ada di Laci Saat Ini</p>
             </div>
-            <h4 className="font-semibold mb-2 text-gray-700">Rincian Pemasukan Hari Ini:</h4>
-            <div className="space-y-2">
-              {data.finalCashBreakdown && Object.entries(data.finalCashBreakdown).map(([method, amount]) => (
-                <div key={method} className="flex justify-between text-sm p-2 bg-gray-50 rounded-md">
-                  <span className="text-gray-600">{method}</span>
-                  <span className="font-medium">{formatCurrency(amount as number)}</span>
+
+            <div className="bg-gray-50 border rounded-lg p-4 space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Kas Awal / Sisa Setoran Sebelumnya</span>
+                <span className="font-semibold text-gray-800">{formatCurrency(data.openingCash || 0)}</span>
+              </div>
+              <div className="flex justify-between text-emerald-700">
+                <span>(+) Pemasukan Tunai Masuk Laci (Periode)</span>
+                <span className="font-semibold">+ {formatCurrency(data.cashInPeriod || 0)}</span>
+              </div>
+              <div className="flex justify-between text-rose-700">
+                <span>(-) Pengeluaran dari Kas Laci (Periode)</span>
+                <span className="font-semibold">- {formatCurrency(data.cashOutPeriod || 0)}</span>
+              </div>
+              {(data.cashTransferNetPeriod || 0) !== 0 && (
+                <div className={`flex justify-between ${(data.cashTransferNetPeriod || 0) >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>
+                  <span>({(data.cashTransferNetPeriod || 0) >= 0 ? '+' : '-'}) Mutasi Laci / Pindah Akun</span>
+                  <span className="font-semibold">
+                    {(data.cashTransferNetPeriod || 0) >= 0
+                      ? `+ ${formatCurrency(data.cashTransferNetPeriod || 0)}`
+                      : `- ${formatCurrency(Math.abs(data.cashTransferNetPeriod || 0))}`}
+                  </span>
                 </div>
-              ))}
+              )}
+              <div className="border-t pt-2 flex justify-between font-bold text-gray-900">
+                <span>Total Kas Akhir Laci</span>
+                <span>{formatCurrency(data.finalCashTotal || 0)}</span>
+              </div>
+            </div>
+
+            {data.finalCashBreakdown && Object.keys(data.finalCashBreakdown).length > 0 && (
+              <div>
+                <h4 className="font-semibold mb-2 text-sm text-gray-700">Rincian Tunai Masuk (Periode Ini):</h4>
+                <div className="space-y-1.5">
+                  {Object.entries(data.finalCashBreakdown).map(([method, amount]) => (
+                    <div key={method} className="flex justify-between text-sm p-2 bg-emerald-50/60 border border-emerald-100 rounded-md">
+                      <span className="text-gray-700">{method}</span>
+                      <span className="font-semibold text-emerald-800">{formatCurrency(amount as number)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h4 className="font-semibold mb-2 text-sm text-gray-700">
+                Pemasukan Non-Tunai Periode Ini (Masuk Rekening / QRIS, Tidak ke Laci):
+              </h4>
+              {data.nonCashBreakdown && Object.keys(data.nonCashBreakdown).length > 0 ? (
+                <div className="space-y-1.5">
+                  {Object.entries(data.nonCashBreakdown).map(([method, amount]) => (
+                    <div key={method} className="flex justify-between text-sm p-2 bg-sky-50 border border-sky-100 rounded-md">
+                      <span className="text-sky-900">{method}</span>
+                      <span className="font-semibold text-sky-800">{formatCurrency(amount as number)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold text-sky-900 px-2 pt-1">
+                    <span>Total Non-Tunai Periode Ini</span>
+                    <span>{formatCurrency(data.nonCashTotal || 0)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 bg-gray-50 p-2 rounded">Belum ada pembayaran Non-Tunai pada periode ini.</p>
+              )}
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t">
+              {onOpenHistory && (
+                <button
+                  onClick={() => { onClose(); onOpenHistory(); }}
+                  className="px-4 py-2 text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg"
+                >
+                  Log Kas & Setoran
+                </button>
+              )}
+              {onOpenSetor && (
+                <button
+                  onClick={() => { onClose(); onOpenSetor(); }}
+                  className="px-4 py-2 text-sm font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
+                >
+                  Setor Dana
+                </button>
+              )}
             </div>
           </div>
         );
@@ -743,7 +1351,7 @@ const BulkDueDateModal: React.FC<{
   onClose: () => void;
   onConfirm: (newDueDate: string) => void;
 }> = ({ itemCount, onClose, onConfirm }) => {
-    const [newDueDate, setNewDueDate] = useState(new Date().toISOString().substring(0, 10));
+    const [newDueDate, setNewDueDate] = useState(getLocalDateString());
 
     const handleConfirm = () => {
         onConfirm(newDueDate);
@@ -793,9 +1401,40 @@ interface ReceivablesProps {
   customers: CustomerData[];
   categories: CategoryData[];
   expenses: ExpenseItem[];
+  expenseMetadata?: Record<number, ExpenseMetadata>;
+  supplierBills?: SupplierBill[];
+  bankInstallments?: BankInstallment[];
+  privateExpenses?: PrivateExpenseItem[];
   initialCash: number;
+  cashDrawerState: CashDrawerState;
+  cashDrawerLogs: CashDrawerLog[];
+  cashTransfers?: CashTransferRecord[];
+  currentUserName?: string;
   paymentMethods: PaymentMethod[];
   onUpdateInitialCash: (amount: number) => void;
+  onUpdateCashDrawerInitial: (amount: number, periodStartDate?: string, notes?: string) => Promise<void>;
+  onSetorCash: (payload: {
+    depositAmount: number;
+    physicalCash?: number;
+    recipient: string;
+    depositToAccountId?: string;
+    depositToAccountName?: string;
+    notes?: string;
+    summary: {
+      periodStartDate: string;
+      periodEndDate: string;
+      openingCash: number;
+      cashInTotal: number;
+      cashOutTotal: number;
+      nonCashTotal: number;
+      expectedCash: number;
+      rawCashInToday: number;
+      rawCashOutToday: number;
+      rawTransferInToday: number;
+      rawTransferOutToday: number;
+      breakdownByMethod: Record<string, number>;
+    };
+  }) => Promise<void>;
   onProcessPayment: (orderId: string, paymentDetails: Payment, newDiscount?: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onPayUnprocessedOrder: (orderId: string, paymentDetails: Payment, newDiscount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onBulkProcessPayment: (orderIds: string[], paymentDate: string, paymentMethodId: string) => void;
@@ -816,8 +1455,8 @@ const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> =
 
 
 const Receivables: React.FC<ReceivablesProps> = ({ 
-    receivables, unprocessedOrders, allOrders, boardData, products, finishings, customers, categories, expenses, initialCash, paymentMethods,
-    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings,
+    receivables, unprocessedOrders, allOrders, boardData, products, finishings, customers, categories, expenses, expenseMetadata = {}, supplierBills = [], bankInstallments = [], privateExpenses = [], initialCash, cashDrawerState, cashDrawerLogs, cashTransfers = [], currentUserName, paymentMethods,
+    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateCashDrawerInitial, onSetorCash, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings,
     legacyReceivables, onPayLegacyReceivable
 }) => {
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
@@ -827,6 +1466,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
   const [isFilterVisible, setIsFilterVisible] = useState(true);
   const [isBulkPayModalOpen, setBulkPayModalOpen] = useState(false);
   const [isInitialCashModalOpen, setInitialCashModalOpen] = useState(false);
+  const [isSetorModalOpen, setSetorModalOpen] = useState(false);
+  const [isHistoryModalOpen, setHistoryModalOpen] = useState(false);
   const [isBulkDueDateModalOpen, setBulkDueDateModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [summaryModal, setSummaryModal] = useState<{
@@ -845,8 +1486,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
   // Default filter: 30 hari terakhir & status Belum Lunas
   const defaultStartDate = useMemo(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().substring(0, 10);
+    d.setUTCDate(d.getUTCDate() - 30);
+    return getLocalDateString(d);
   }, []);
 
   // Filter states: Default 30 hari terakhir dan status Belum Lunas
@@ -1031,8 +1672,24 @@ const Receivables: React.FC<ReceivablesProps> = ({
   }, []);
 
 
-  // Stats for cards
-  const today = new Date().toISOString().substring(0, 10);
+  // Stats for cards & cumulative cash drawer
+  const today = getLocalDateString();
+  const periodStartDate = cashDrawerState.periodStartDate || today;
+  const effectiveOpeningCash = cashDrawerState.openingCash ?? initialCash;
+
+  const isCashPayment = useCallback((p: { methodId?: string; methodName?: string }): boolean => {
+      if (p.methodId) {
+          const matched = paymentMethods.find(m => m.id === p.methodId);
+          if (matched) return matched.type === 'Tunai';
+      }
+      if (p.methodName) {
+          const matchedByName = paymentMethods.find(m => m.name.toLowerCase() === p.methodName!.toLowerCase());
+          if (matchedByName) return matchedByName.type === 'Tunai';
+          const lower = p.methodName.toLowerCase();
+          return lower.includes('tunai') || lower.includes('cash');
+      }
+      return true;
+  }, [paymentMethods]);
   
   const paymentsToday = useMemo(() => {
     return receivables.reduce((total, receivable) => {
@@ -1053,11 +1710,152 @@ const Receivables: React.FC<ReceivablesProps> = ({
           }, 0);
   }, [allDisplayItems, allOrders, today]);
 
-  const expensesToday = useMemo(() => {
-      return expenses.filter(e => e.date === today).reduce((sum, e) => sum + e.amount, 0);
-  }, [expenses, today]);
+  const kasLaciOutflowsAll = useMemo(() => {
+      const list: ExpenseItem[] = [];
+      expenses.forEach(e => {
+          const funding = expenseMetadata[e.id]?.fundingSource || 'Kas Laci';
+          if (funding === 'Kas Laci') {
+              list.push(e);
+          }
+      });
+      supplierBills.forEach(bill => {
+          bill.payments.forEach((p, idx) => {
+              if (p.fundingSource === 'Kas Laci') {
+                  list.push({
+                      id: Number(`91${idx}${bill.supplierId}`) || Date.now() + idx,
+                      name: `Bayar Tagihan ${bill.supplierName} (${bill.invoiceNumber})`,
+                      category: 'Cicilan Pemasok (Kas Laci)',
+                      amount: p.amount,
+                      date: p.date,
+                  });
+              }
+          });
+      });
+      bankInstallments.forEach(inst => {
+          inst.payments.forEach((p, idx) => {
+              if (p.fundingSource === 'Kas Laci') {
+                  list.push({
+                      id: Number(`92${idx}`) || Date.now() + idx,
+                      name: `Cicilan Bank: ${inst.name}`,
+                      category: 'Cicilan Bank (Kas Laci)',
+                      amount: p.totalPaid,
+                      date: p.date,
+                  });
+              }
+          });
+      });
+      privateExpenses.forEach((pe, idx) => {
+          if (pe.fundingSource === 'Kas Laci') {
+              list.push({
+                  id: Number(`93${idx}`) || Date.now() + idx,
+                  name: pe.name,
+                  category: `Pribadi/Lain-lain (Kas Laci)`,
+                  amount: pe.amount,
+                  date: pe.date,
+              });
+          }
+      });
+      return list;
+  }, [expenses, expenseMetadata, supplierBills, bankInstallments, privateExpenses]);
 
-  const finalCash = initialCash + paymentsToday - expensesToday;
+  const expensesTodayDetails = useMemo(() => {
+      return kasLaciOutflowsAll.filter(e => e.date === today);
+  }, [kasLaciOutflowsAll, today]);
+
+  const expensesToday = useMemo(() => {
+      return expensesTodayDetails.reduce((sum, e) => sum + e.amount, 0);
+  }, [expensesTodayDetails]);
+
+  const cashMethodIds = useMemo(() => {
+      const ids = new Set(paymentMethods.filter(m => m.type === 'Tunai').map(m => m.id));
+      if (ids.size === 0) ids.add('cash-default');
+      return ids;
+  }, [paymentMethods]);
+
+  const nonCashAccounts = useMemo(
+      () => paymentMethods.filter(m => m.type !== 'Tunai'),
+      [paymentMethods]
+  );
+
+  const cashDrawerMetrics = useMemo(() => {
+      let rawCashInPeriod = 0;
+      let rawCashInToday = 0;
+      let nonCashPeriodTotal = 0;
+      const cashBreakdown: Record<string, number> = {};
+      const nonCashBreakdown: Record<string, number> = {};
+      const allBreakdown: Record<string, number> = {};
+
+      receivables.forEach(r => {
+          r.payments?.forEach(p => {
+              const cash = isCashPayment(p);
+              if (p.date === today && cash) {
+                  rawCashInToday += p.amount;
+              }
+              if (p.date >= periodStartDate && p.date <= today) {
+                  allBreakdown[p.methodName] = (allBreakdown[p.methodName] || 0) + p.amount;
+                  if (cash) {
+                      rawCashInPeriod += p.amount;
+                      cashBreakdown[p.methodName] = (cashBreakdown[p.methodName] || 0) + p.amount;
+                  } else {
+                      nonCashPeriodTotal += p.amount;
+                      nonCashBreakdown[p.methodName] = (nonCashBreakdown[p.methodName] || 0) + p.amount;
+                  }
+              }
+          });
+      });
+
+      let rawCashOutPeriod = 0;
+      let rawCashOutToday = 0;
+      kasLaciOutflowsAll.forEach(e => {
+          if (e.date === today) {
+              rawCashOutToday += e.amount;
+          }
+          if (e.date >= periodStartDate && e.date <= today) {
+              rawCashOutPeriod += e.amount;
+          }
+      });
+
+      let rawTransferInPeriod = 0;
+      let rawTransferOutPeriod = 0;
+      let rawTransferInToday = 0;
+      let rawTransferOutToday = 0;
+      cashTransfers.forEach(t => {
+          const toIsCash = !!t.toAccountId && cashMethodIds.has(t.toAccountId);
+          const fromIsCash = !!t.fromAccountId && cashMethodIds.has(t.fromAccountId);
+          if (t.date === today) {
+              if (toIsCash) rawTransferInToday += t.netAmount;
+              if (fromIsCash) rawTransferOutToday += t.amount;
+          }
+          if (t.date >= periodStartDate && t.date <= today) {
+              if (toIsCash) rawTransferInPeriod += t.netAmount;
+              if (fromIsCash) rawTransferOutPeriod += t.amount;
+          }
+      });
+
+      const cashInPeriod = Math.max(0, rawCashInPeriod - (cashDrawerState.settledCashInOnStartDate || 0));
+      const cashOutPeriod = Math.max(0, rawCashOutPeriod - (cashDrawerState.settledCashOutOnStartDate || 0));
+      const transferInPeriod = Math.max(0, rawTransferInPeriod - (cashDrawerState.settledCashTransferInOnStartDate || 0));
+      const transferOutPeriod = Math.max(0, rawTransferOutPeriod - (cashDrawerState.settledCashTransferOutOnStartDate || 0));
+      const cashTransferNetPeriod = transferInPeriod - transferOutPeriod;
+      const finalCash = effectiveOpeningCash + cashInPeriod - cashOutPeriod + cashTransferNetPeriod;
+
+      return {
+          cashInPeriod,
+          cashOutPeriod,
+          cashTransferNetPeriod,
+          rawCashInToday,
+          rawCashOutToday,
+          rawTransferInToday,
+          rawTransferOutToday,
+          nonCashPeriodTotal,
+          cashBreakdown,
+          nonCashBreakdown,
+          allBreakdown,
+          finalCash,
+      };
+  }, [receivables, kasLaciOutflowsAll, cashTransfers, cashMethodIds, isCashPayment, periodStartDate, today, cashDrawerState, effectiveOpeningCash]);
+
+  const finalCash = cashDrawerMetrics.finalCash;
 
   const totalOrdersToday = allOrders
       .filter(o => o.orderDate === today)
@@ -1126,16 +1924,16 @@ const Receivables: React.FC<ReceivablesProps> = ({
 
   // --- START: Data calculations for Summary Modal ---
   const paymentsTodayDetails = useMemo(() => {
-      const details: { customer: string, orderId: string, methodName: string, amount: number }[] = [];
+      const details: { customer: string, orderId: string, methodName: string, amount: number, isCash: boolean }[] = [];
       receivables.forEach(r => {
           r.payments?.forEach(p => {
               if (p.date === today) {
-                  details.push({ customer: r.customer, orderId: r.id, methodName: p.methodName, amount: p.amount });
+                  details.push({ customer: r.customer, orderId: r.id, methodName: p.methodName, amount: p.amount, isCash: isCashPayment(p) });
               }
           });
       });
       return details;
-  }, [receivables, today]);
+  }, [receivables, today, isCashPayment]);
 
   const receivablesTodayUnpaidDetails = useMemo(() => {
       const todayOrderIds = new Set(allOrders.filter(o => o.orderDate === today).map(o => o.id));
@@ -1148,16 +1946,6 @@ const Receivables: React.FC<ReceivablesProps> = ({
           })
           .filter(r => r.remaining > 0);
   }, [receivables, allOrders, today]);
-
-  const expensesTodayDetails = useMemo(() => expenses.filter(e => e.date === today), [expenses, today]);
-
-  const finalCashBreakdown = useMemo(() => {
-      const breakdown: { [methodName: string]: number } = {};
-      paymentsTodayDetails.forEach(p => {
-          breakdown[p.methodName] = (breakdown[p.methodName] || 0) + p.amount;
-      });
-      return breakdown;
-  }, [paymentsTodayDetails]);
   // --- END: Data calculations for Summary Modal ---
 
   const handlePrintReceipt = (order: ReceivableItem) => {
@@ -2309,10 +3097,10 @@ const Receivables: React.FC<ReceivablesProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <StatCard 
             icon={<CurrencyDollarIcon />} 
-            title="Kas Awal" 
-            value={formatCurrency(initialCash)}
+            title="Kas Awal Periode" 
+            value={formatCurrency(effectiveOpeningCash)}
             gradient="bg-gradient-to-br from-gray-500 to-gray-600"
-            onClick={() => setSummaryModal({ type: 'initialCashInfo', title: 'Informasi Kas Awal' })}
+            onClick={() => setSummaryModal({ type: 'initialCashInfo', title: `Kas Awal (Sejak ${formatDate(periodStartDate)})` })}
         />
         <StatCard 
             icon={<CreditCardIcon />} 
@@ -2330,17 +3118,17 @@ const Receivables: React.FC<ReceivablesProps> = ({
         />
         <StatCard 
             icon={<ReceiptTaxIcon />} 
-            title="Pengeluaran Hari Ini" 
+            title="Pengeluaran Laci Hari Ini" 
             value={formatCurrency(expensesToday)}
             gradient="bg-gradient-to-br from-rose-500 to-red-500"
-            onClick={() => setSummaryModal({ type: 'expenses', title: 'Riwayat Pengeluaran Hari Ini' })}
+            onClick={() => setSummaryModal({ type: 'expenses', title: 'Pengeluaran dari Kas Laci Hari Ini' })}
         />
         <StatCard 
             icon={<CurrencyDollarIcon />} 
-            title="Kas Akhir" 
+            title="Kas Akhir (Laci)" 
             value={formatCurrency(finalCash)}
             gradient="bg-gradient-to-br from-fuchsia-500 to-purple-500"
-            onClick={() => setSummaryModal({ type: 'finalCash', title: 'Rincian Kas Akhir' })}
+            onClick={() => setSummaryModal({ type: 'finalCash', title: 'Rincian Kas Akhir Laci (Akumulatif)' })}
         />
     </div>
 
@@ -2402,17 +3190,33 @@ const Receivables: React.FC<ReceivablesProps> = ({
                     <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
                     <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} className="p-2 border rounded-md text-sm text-gray-500" />
                 </div>
-                <div className="flex justify-between items-center mt-3">
-                    <div>
+                <div className="flex flex-wrap justify-between items-center mt-3 gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                          <button 
                             onClick={() => setInitialCashModalOpen(true)}
-                            className="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-700 mr-2"
+                            className="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-700"
                         >
                             Kas Awal
                         </button>
+                        <button
+                            onClick={() => setSetorModalOpen(true)}
+                            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-purple-700 flex items-center space-x-1.5 shadow-sm"
+                            title="Setor dana kas laci ke owner atau rekening bank dan mulai periode baru"
+                        >
+                            <ArrowUpTrayIcon className="h-4 w-4" />
+                            <span>Setor Dana</span>
+                        </button>
+                        <button
+                            onClick={() => setHistoryModalOpen(true)}
+                            className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3.5 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-100 flex items-center space-x-1.5"
+                            title="Lihat riwayat setoran dan penyesuaian kas awal"
+                        >
+                            <CalendarDaysIcon className="h-4 w-4" />
+                            <span>Log Kas & Setoran ({cashDrawerLogs.length})</span>
+                        </button>
                         <button 
                             onClick={() => setBulkPayModalOpen(true)}
-                            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 mr-2 disabled:bg-green-300 disabled:cursor-not-allowed"
+                            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed"
                             disabled={!filterCustomer || unpaidFilteredItems.length === 0}
                             title={!filterCustomer ? 'Pilih pelanggan di filter untuk mengaktifkan' : 'Bayar semua nota yang belum lunas untuk pelanggan ini'}
                         >
@@ -2421,7 +3225,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                         {filterStatus === 'Belum Lunas' && (
                              <button 
                                 onClick={() => setBulkDueDateModalOpen(true)}
-                                className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 mr-2 disabled:bg-amber-300 disabled:cursor-not-allowed"
+                                className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 disabled:bg-amber-300 disabled:cursor-not-allowed"
                                 disabled={unpaidFilteredItems.length === 0}
                             >
                                 Ubah Jatuh Tempo ({unpaidFilteredItems.length} Nota)
@@ -2591,9 +3395,60 @@ const Receivables: React.FC<ReceivablesProps> = ({
       )}
        {isInitialCashModalOpen && (
         <InitialCashModal
-            currentAmount={initialCash}
+            currentAmount={effectiveOpeningCash}
+            currentStartDate={periodStartDate}
             onClose={() => setInitialCashModalOpen(false)}
-            onSave={onUpdateInitialCash}
+            onSave={(amount, startDate, notes) => {
+              onUpdateInitialCash(amount);
+              onUpdateCashDrawerInitial(amount, startDate, notes);
+            }}
+        />
+    )}
+    {isSetorModalOpen && (
+        <DepositCashModal
+            periodStartDate={periodStartDate}
+            today={today}
+            openingCash={effectiveOpeningCash}
+            cashInPeriod={cashDrawerMetrics.cashInPeriod}
+            cashOutPeriod={cashDrawerMetrics.cashOutPeriod}
+            cashTransferNetPeriod={cashDrawerMetrics.cashTransferNetPeriod}
+            expectedCash={cashDrawerMetrics.finalCash}
+            nonCashTotal={cashDrawerMetrics.nonCashPeriodTotal}
+            cashBreakdown={cashDrawerMetrics.cashBreakdown}
+            nonCashBreakdown={cashDrawerMetrics.nonCashBreakdown}
+            nonCashAccounts={nonCashAccounts}
+            currentUserName={currentUserName}
+            onClose={() => setSetorModalOpen(false)}
+            onConfirmSetor={async ({ depositAmount, physicalCash, recipient, depositToAccountId, depositToAccountName, notes }) => {
+              await onSetorCash({
+                depositAmount,
+                physicalCash,
+                recipient,
+                depositToAccountId,
+                depositToAccountName,
+                notes,
+                summary: {
+                  periodStartDate,
+                  periodEndDate: today,
+                  openingCash: effectiveOpeningCash,
+                  cashInTotal: cashDrawerMetrics.cashInPeriod,
+                  cashOutTotal: cashDrawerMetrics.cashOutPeriod,
+                  nonCashTotal: cashDrawerMetrics.nonCashPeriodTotal,
+                  expectedCash: cashDrawerMetrics.finalCash,
+                  rawCashInToday: cashDrawerMetrics.rawCashInToday,
+                  rawCashOutToday: cashDrawerMetrics.rawCashOutToday,
+                  rawTransferInToday: cashDrawerMetrics.rawTransferInToday,
+                  rawTransferOutToday: cashDrawerMetrics.rawTransferOutToday,
+                  breakdownByMethod: cashDrawerMetrics.allBreakdown,
+                },
+              });
+            }}
+        />
+    )}
+    {isHistoryModalOpen && (
+        <CashDrawerHistoryModal
+            logs={cashDrawerLogs}
+            onClose={() => setHistoryModalOpen(false)}
         />
     )}
     {summaryModal.type && (
@@ -2602,12 +3457,23 @@ const Receivables: React.FC<ReceivablesProps> = ({
             onClose={() => setSummaryModal({ type: null, title: '' })}
             title={summaryModal.title}
             type={summaryModal.type}
+            onOpenSetor={() => setSetorModalOpen(true)}
+            onOpenHistory={() => setHistoryModalOpen(true)}
+            onOpenInitialCash={() => setInitialCashModalOpen(true)}
             data={{
                 payments: paymentsTodayDetails,
                 receivables: receivablesTodayUnpaidDetails,
                 expenses: expensesTodayDetails,
-                finalCashBreakdown: finalCashBreakdown,
-                finalCashTotal: finalCash
+                finalCashBreakdown: cashDrawerMetrics.cashBreakdown,
+                nonCashBreakdown: cashDrawerMetrics.nonCashBreakdown,
+                finalCashTotal: finalCash,
+                openingCash: effectiveOpeningCash,
+                cashInPeriod: cashDrawerMetrics.cashInPeriod,
+                cashOutPeriod: cashDrawerMetrics.cashOutPeriod,
+                cashTransferNetPeriod: cashDrawerMetrics.cashTransferNetPeriod,
+                nonCashTotal: cashDrawerMetrics.nonCashPeriodTotal,
+                periodStartDate,
+                periodEndDate: today,
             }}
         />
     )}

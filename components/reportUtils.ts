@@ -67,7 +67,7 @@ const calculateItemPrice = (
 };
 
 export const exportToExcel = (
-    reportType: 'sales' | 'receivables' | 'inventory', 
+    reportType: 'sales' | 'receivables' | 'inventory' | 'cashFlow', 
     data: any,
     dateRange: { startDate: string, endDate: string },
     extraData?: {
@@ -143,6 +143,10 @@ export const exportToExcel = (
             'Status': i.stock <= 5 ? 'Stok Menipis' : 'Tersedia',
         })));
         XLSX.utils.book_append_sheet(wb, inventorySheet, 'Laporan Stok');
+
+    } else if (reportType === 'cashFlow' && Array.isArray(data)) {
+        const cashFlowSheet = XLSX.utils.json_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, cashFlowSheet, 'Arus Kas');
     }
     
     XLSX.writeFile(wb, fileName);

@@ -11,25 +11,65 @@ import Management from './components/Management';
 import Inventory from './components/Inventory';
 import Production from './components/Production';
 import Reports from './components/Reports';
+import CashFlow from './components/CashFlow';
 import Settings from './components/Settings';
 import Header from './components/Header';
 import Payroll from './components/Payroll';
 import Login from './components/Login';
 import PrintLayout from './components/PrintLayout';
+import Purchases from './components/Purchases';
 import { DEFAULT_FINISHING_SPACE_RULES } from './components/printLayoutUtils';
 import { supabase } from './supabaseClient';
 // @FIX: The 'Session' type is not exported in older versions of '@supabase/supabase-js'. It's removed to prevent type errors.
-import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type InventoryItem, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem, type FinishingSpaceRule, CardData } from './types';
+import { type MenuKey, type KanbanData, type SavedOrder, type ReceivableItem, type ProductionStatus, type ProductionStatusDisplay, type ProductData, type CategoryData, type FinishingData, type Payment, type CustomerData, type ExpenseItem, type ExpenseMetadata, type ExpenseFundingSource, type PurchaseRecord, type PurchaseItem, type SupplierBill, type BillPayment, type InstallmentFundingSource, type BankInstallment, type PrivateExpenseItem, type CashDrawerState, type CashDrawerLog, type CashTransferRecord, type AccountBalanceMeta, type InventoryItem, type InventoryCategory, type InventoryItemMeta, type InventoryCheckStatus, type SupplierData, type EmployeeData, type SalaryData, type AttendanceData, type PayrollRecord, type StockUsageRecord, type MenuPermissions, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type NotificationSettings, type Profile, type UserLevel, type PaymentStatus, type Bonus, type Deduction, type StoreInfo, type PaymentMethod, type OrderItemData, type NotificationItem, type FinishingSpaceRule, CardData } from './types';
+
+const getLocalToday = () => {
+    return new Date().toISOString().substring(0, 10);
+};
+
+const createDefaultCashDrawerState = (openingCash = 0): CashDrawerState => ({
+    periodStartDate: getLocalToday(),
+    periodStartAt: new Date().toISOString(),
+    openingCash,
+    settledCashInOnStartDate: 0,
+    settledCashOutOnStartDate: 0,
+    settledCashTransferInOnStartDate: 0,
+    settledCashTransferOutOnStartDate: 0,
+});
 import { MENU_ITEMS, ALL_PERMISSIONS_LIST } from './constants';
 import { ShoppingCartIcon, ExclamationTriangleIcon, CreditCardIcon } from './components/Icons';
 
 console.log("Build: Script is being parsed and component is about to be created.");
 
 const DEFAULT_MENU_PERMISSIONS: MenuPermissions = {
-    Kasir: ["dashboard", "dashboard/penjualan", "sales", "receivables", "reports", "reports/dataPiutangLama"],
-    Office: ["dashboard", "dashboard/penjualan", "dashboard/produksi", "sales", "printLayout", "receivables", "expenses", "payroll", "payroll/attendance", "payroll/summary", "masterData", "masterData/products", "masterData/categories", "masterData/finishings", "masterData/customers", "masterData/suppliers", "masterData/karyawan", "reports", "reports/sales", "reports/receivables", "reports/inventory", "reports/assetsDebts", "reports/dataPenjualanLama", "reports/finalRecap", "reports/dataPiutangLama", "reports/categorySales"],
+    Kasir: ["dashboard", "dashboard/penjualan", "sales", "receivables", "expenses", "expenses/operational", "reports", "reports/dataPiutangLama"],
+    Office: ["dashboard", "dashboard/penjualan", "dashboard/produksi", "cashFlow", "sales", "printLayout", "receivables", "expenses", "expenses/operational", "expenses/installments", "expenses/private", "purchases", "payroll", "payroll/attendance", "payroll/summary", "masterData", "masterData/products", "masterData/categories", "masterData/finishings", "masterData/customers", "masterData/suppliers", "masterData/karyawan", "reports", "reports/sales", "reports/receivables", "reports/inventory", "reports/assetsDebts", "reports/dataPenjualanLama", "reports/finalRecap", "reports/profitAndLoss", "reports/dataPiutangLama", "reports/categorySales"],
     Produksi: ["dashboard", "dashboard/produksi", "production", "printLayout", "inventory"],
     Admin: ALL_PERMISSIONS_LIST
+};
+
+const normalizeMenuPermissions = (raw: MenuPermissions): MenuPermissions => {
+    const normalized: MenuPermissions = { ...raw };
+    (['Kasir', 'Office', 'Produksi'] as UserLevel[]).forEach(level => {
+        const list = new Set(normalized[level] || []);
+        const hasExpenseSub = Array.from(list).some(p => p.startsWith('expenses/'));
+        if (list.has('expenses') && !hasExpenseSub) {
+            list.add('expenses/operational');
+            if (level === 'Office') {
+                list.add('expenses/installments');
+                list.add('expenses/private');
+                list.add('purchases');
+            }
+        }
+        // Migrasi otomatis izin Arus Kas dari sub-tab Laporan ke menu utama Arus Kas
+        if (list.has('reports/cashFlow')) {
+            list.delete('reports/cashFlow');
+            list.add('cashFlow');
+        }
+        normalized[level] = Array.from(list);
+    });
+    normalized.Admin = ALL_PERMISSIONS_LIST;
+    return normalized;
 };
 
 const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
@@ -123,7 +163,18 @@ const App: React.FC = () => {
   const [noteCounter, setNoteCounter] = useState(1);
   const [notePrefix, setNotePrefix] = useState('INV-');
   const [initialCash, setInitialCash] = useState<number>(0);
+  const [cashDrawerState, setCashDrawerState] = useState<CashDrawerState>(() => createDefaultCashDrawerState(0));
+  const [cashDrawerLogs, setCashDrawerLogs] = useState<CashDrawerLog[]>([]);
+  const [cashTransfers, setCashTransfers] = useState<CashTransferRecord[]>([]);
+  const [accountBalancesMeta, setAccountBalancesMeta] = useState<Record<string, AccountBalanceMeta>>({});
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(DEFAULT_PAYMENT_METHODS);
+  const [expenseMetadata, setExpenseMetadata] = useState<Record<number, ExpenseMetadata>>({});
+  const [inventoryMetadata, setInventoryMetadata] = useState<Record<number, InventoryItemMeta>>({});
+  const [inventoryCheckStatus, setInventoryCheckStatus] = useState<InventoryCheckStatus>({});
+  const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
+  const [supplierBills, setSupplierBills] = useState<SupplierBill[]>([]);
+  const [bankInstallments, setBankInstallments] = useState<BankInstallment[]>([]);
+  const [privateExpenses, setPrivateExpenses] = useState<PrivateExpenseItem[]>([]);
   const [finishingSpaceRules, setFinishingSpaceRules] = useState<FinishingSpaceRule[]>(() => {
     try {
       const saved = localStorage.getItem('nala_finishing_space_rules');
@@ -161,6 +212,13 @@ const App: React.FC = () => {
     setNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS);
     setStoreInfo(DEFAULT_STORE_INFO);
     setPaymentMethods(DEFAULT_PAYMENT_METHODS);
+    setExpenseMetadata({});
+    setInventoryMetadata({});
+    setInventoryCheckStatus({});
+    setPurchases([]);
+    setSupplierBills([]);
+    setBankInstallments([]);
+    setPrivateExpenses([]);
     setLegacyMonthlyIncomes([]);
     setLegacyMonthlyExpenses([]);
     setLegacyReceivables([]);
@@ -169,6 +227,10 @@ const App: React.FC = () => {
     setNoteCounter(1);
     setNotePrefix('INV-');
     setInitialCash(0);
+    setCashDrawerState(createDefaultCashDrawerState(0));
+    setCashDrawerLogs([]);
+    setCashTransfers([]);
+    setAccountBalancesMeta({});
     setNotifications([]);
   }, []);
 
@@ -247,11 +309,21 @@ const App: React.FC = () => {
     const initialCashSetting = settings.find((s:any) => s.key === 'initialCash');
     const paymentMethodsSetting = settings.find((s:any) => s.key === 'paymentMethods');
     const finishingSpaceRulesSetting = settings.find((s:any) => s.key === 'finishingSpaceRules');
+    const expenseMetadataSetting = settings.find((s:any) => s.key === 'expenseMetadata');
+    const inventoryMetadataSetting = settings.find((s:any) => s.key === 'inventoryMetadata');
+    const inventoryCheckStatusSetting = settings.find((s:any) => s.key === 'inventoryCheckStatus');
+    const purchasesSetting = settings.find((s:any) => s.key === 'purchases');
+    const supplierBillsSetting = settings.find((s:any) => s.key === 'supplierBills');
+    const bankInstallmentsSetting = settings.find((s:any) => s.key === 'bankInstallments');
+    const privateExpensesSetting = settings.find((s:any) => s.key === 'privateExpenses');
+
+    const cashDrawerStateSetting = settings.find((s:any) => s.key === 'cashDrawerState');
+    const cashDrawerLogsSetting = settings.find((s:any) => s.key === 'cashDrawerLogs');
+    const cashTransfersSetting = settings.find((s:any) => s.key === 'cashTransfers');
+    const accountBalancesMetaSetting = settings.find((s:any) => s.key === 'accountBalancesMeta');
 
     if (menuPermsSetting && menuPermsSetting.value) {
-        const dbPermissions = menuPermsSetting.value as MenuPermissions;
-        dbPermissions.Admin = ALL_PERMISSIONS_LIST;
-        setMenuPermissions(dbPermissions);
+        setMenuPermissions(normalizeMenuPermissions(menuPermsSetting.value as MenuPermissions));
     }
     if (notifSetting && notifSetting.value) {
         setNotificationSettings({ ...DEFAULT_NOTIFICATION_SETTINGS, ...notifSetting.value });
@@ -259,6 +331,27 @@ const App: React.FC = () => {
     if (storeInfoSetting) setStoreInfo(storeInfoSetting.value);
     if (paymentMethodsSetting && Array.isArray(paymentMethodsSetting.value)) {
         setPaymentMethods(paymentMethodsSetting.value);
+    }
+    if (expenseMetadataSetting && expenseMetadataSetting.value && typeof expenseMetadataSetting.value === 'object') {
+        setExpenseMetadata(expenseMetadataSetting.value);
+    }
+    if (inventoryMetadataSetting && inventoryMetadataSetting.value && typeof inventoryMetadataSetting.value === 'object') {
+        setInventoryMetadata(inventoryMetadataSetting.value);
+    }
+    if (inventoryCheckStatusSetting && inventoryCheckStatusSetting.value && typeof inventoryCheckStatusSetting.value === 'object') {
+        setInventoryCheckStatus(inventoryCheckStatusSetting.value);
+    }
+    if (purchasesSetting && Array.isArray(purchasesSetting.value)) {
+        setPurchases(purchasesSetting.value);
+    }
+    if (supplierBillsSetting && Array.isArray(supplierBillsSetting.value)) {
+        setSupplierBills(supplierBillsSetting.value);
+    }
+    if (bankInstallmentsSetting && Array.isArray(bankInstallmentsSetting.value)) {
+        setBankInstallments(bankInstallmentsSetting.value);
+    }
+    if (privateExpensesSetting && Array.isArray(privateExpensesSetting.value)) {
+        setPrivateExpenses(privateExpensesSetting.value);
     }
     if (finishingSpaceRulesSetting && Array.isArray(finishingSpaceRulesSetting.value)) {
         setFinishingSpaceRules(finishingSpaceRulesSetting.value);
@@ -268,10 +361,21 @@ const App: React.FC = () => {
             // Ignore storage error
         }
     }
-    if (initialCashSetting && typeof initialCashSetting.value === 'number') {
-        setInitialCash(initialCashSetting.value);
+    const parsedInitialCash = (initialCashSetting && typeof initialCashSetting.value === 'number') ? initialCashSetting.value : 0;
+    setInitialCash(parsedInitialCash);
+    if (cashDrawerStateSetting && cashDrawerStateSetting.value && typeof cashDrawerStateSetting.value === 'object') {
+        setCashDrawerState(cashDrawerStateSetting.value as CashDrawerState);
     } else {
-        setInitialCash(0);
+        setCashDrawerState(createDefaultCashDrawerState(parsedInitialCash));
+    }
+    if (cashDrawerLogsSetting && Array.isArray(cashDrawerLogsSetting.value)) {
+        setCashDrawerLogs(cashDrawerLogsSetting.value);
+    }
+    if (cashTransfersSetting && Array.isArray(cashTransfersSetting.value)) {
+        setCashTransfers(cashTransfersSetting.value);
+    }
+    if (accountBalancesMetaSetting && accountBalancesMetaSetting.value && typeof accountBalancesMetaSetting.value === 'object') {
+        setAccountBalancesMeta(accountBalancesMetaSetting.value);
     }
     console.log("All data fetched and processed.");
   }, []);
@@ -436,15 +540,34 @@ const App: React.FC = () => {
                     const { key, value } = newRecord;
                     switch (key) {
                         case 'menuPermissions':
-                            const dbPermissions = value as MenuPermissions;
-                            dbPermissions.Admin = ALL_PERMISSIONS_LIST;
-                            setMenuPermissions(dbPermissions);
+                            setMenuPermissions(normalizeMenuPermissions(value as MenuPermissions));
                             break;
                         case 'notificationSettings':
                             setNotificationSettings(prev => ({ ...prev, ...value }));
                             break;
                         case 'storeInfo': setStoreInfo(value); break;
                         case 'paymentMethods': setPaymentMethods(Array.isArray(value) ? value : DEFAULT_PAYMENT_METHODS); break;
+                        case 'expenseMetadata':
+                            if (value && typeof value === 'object') setExpenseMetadata(value);
+                            break;
+                        case 'inventoryMetadata':
+                            if (value && typeof value === 'object') setInventoryMetadata(value as Record<number, InventoryItemMeta>);
+                            break;
+                        case 'inventoryCheckStatus':
+                            if (value && typeof value === 'object') setInventoryCheckStatus(value as InventoryCheckStatus);
+                            break;
+                        case 'purchases':
+                            if (Array.isArray(value)) setPurchases(value);
+                            break;
+                        case 'supplierBills':
+                            if (Array.isArray(value)) setSupplierBills(value);
+                            break;
+                        case 'bankInstallments':
+                            if (Array.isArray(value)) setBankInstallments(value);
+                            break;
+                        case 'privateExpenses':
+                            if (Array.isArray(value)) setPrivateExpenses(value);
+                            break;
                         case 'finishingSpaceRules':
                             if (Array.isArray(value)) {
                                 setFinishingSpaceRules(value);
@@ -452,6 +575,18 @@ const App: React.FC = () => {
                             }
                             break;
                         case 'initialCash': setInitialCash(typeof value === 'number' ? value : 0); break;
+                        case 'cashDrawerState':
+                            if (value && typeof value === 'object') setCashDrawerState(value as CashDrawerState);
+                            break;
+                        case 'cashDrawerLogs':
+                            if (Array.isArray(value)) setCashDrawerLogs(value as CashDrawerLog[]);
+                            break;
+                        case 'cashTransfers':
+                            if (Array.isArray(value)) setCashTransfers(value as CashTransferRecord[]);
+                            break;
+                        case 'accountBalancesMeta':
+                            if (value && typeof value === 'object') setAccountBalancesMeta(value as Record<string, AccountBalanceMeta>);
+                            break;
                     }
                 }
                 break;
@@ -523,12 +658,83 @@ const App: React.FC = () => {
                   onNavigate: () => navigateTo('production'),
               });
           }
+
+          // 4. Upcoming / Overdue Supplier Bills & Bank Installments
+          const todayLocal = new Date().toISOString().substring(0, 10);
+          supplierBills.forEach(bill => {
+              if (bill.status === 'Belum Lunas' && bill.dueDate) {
+                  const diffDays = Math.ceil((new Date(bill.dueDate).getTime() - new Date(todayLocal).getTime()) / (1000 * 60 * 60 * 24));
+                  if (diffDays < 0) {
+                      newNotifications.push({
+                          id: `sup-overdue-${bill.id}`,
+                          icon: <ExclamationTriangleIcon className="h-5 w-5 text-red-500" />,
+                          text: `Tagihan pemasok '${bill.supplierName}' (${bill.invoiceNumber}) telah jatuh tempo.`,
+                          time: now.toISOString(),
+                          type: 'warning',
+                          onNavigate: () => navigateTo('expenses'),
+                      });
+                  } else if (diffDays <= 3) {
+                      newNotifications.push({
+                          id: `sup-soon-${bill.id}`,
+                          icon: <CreditCardIcon className="h-5 w-5 text-amber-500" />,
+                          text: `Tagihan pemasok '${bill.supplierName}' jatuh tempo dalam ${diffDays} hari.`,
+                          time: now.toISOString(),
+                          type: 'info',
+                          onNavigate: () => navigateTo('expenses'),
+                      });
+                  }
+              }
+          });
+          bankInstallments.forEach(inst => {
+              if (inst.status === 'Aktif' && inst.nextDueDate) {
+                  const diffDays = Math.ceil((new Date(inst.nextDueDate).getTime() - new Date(todayLocal).getTime()) / (1000 * 60 * 60 * 24));
+                  if (diffDays <= 3) {
+                      newNotifications.push({
+                          id: `bank-due-${inst.id}`,
+                          icon: <CreditCardIcon className="h-5 w-5 text-purple-500" />,
+                          text: diffDays < 0
+                              ? `Cicilan bank '${inst.name}' melewati tanggal jatuh tempo.`
+                              : `Cicilan bank '${inst.name}' jatuh tempo dalam ${diffDays} hari.`,
+                          time: now.toISOString(),
+                          type: diffDays < 0 ? 'warning' : 'info',
+                          onNavigate: () => navigateTo('expenses'),
+                      });
+                  }
+              }
+          });
           
+          // 5. Inventory Check Reminder (if >= 7 days or never checked)
+          if (inventory.length > 0) {
+              const lastChecked = inventoryCheckStatus.lastCheckedAt;
+              if (!lastChecked) {
+                  newNotifications.push({
+                      id: 'inventory-check-never',
+                      icon: <ExclamationTriangleIcon className="h-5 w-5 text-amber-500" />,
+                      text: 'Inventori belum pernah dikonfirmasi pemeriksaannya. Cek kondisi barang sekarang.',
+                      time: now.toISOString(),
+                      type: 'warning',
+                      onNavigate: () => navigateTo('inventory'),
+                  });
+              } else {
+                  const diffDays = Math.floor((now.getTime() - new Date(lastChecked).getTime()) / (1000 * 60 * 60 * 24));
+                  if (diffDays >= 7) {
+                      newNotifications.push({
+                          id: 'inventory-check-overdue',
+                          icon: <ExclamationTriangleIcon className="h-5 w-5 text-red-500" />,
+                          text: `Inventori sudah ${diffDays} hari belum diperiksa (terakhir oleh ${inventoryCheckStatus.lastCheckedBy || '-'}).`,
+                          time: now.toISOString(),
+                          type: 'warning',
+                          onNavigate: () => navigateTo('inventory'),
+                      });
+                  }
+              }
+          }
+
           setNotifications(newNotifications.sort((a,b) => b.time.localeCompare(a.time)));
       };
 
       generateNotifications();
-  }, [inventory, unprocessedOrders, notificationSettings, profile, navigateTo]);
+  }, [inventory, inventoryCheckStatus, unprocessedOrders, supplierBills, bankInstallments, notificationSettings, profile, navigateTo]);
 
   const handleDismissNotification = useCallback((id: string) => {
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -622,6 +828,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleUpdateInitialCash = useCallback(async (amount: number) => {
+    setInitialCash(amount);
     const { error } = await supabase
         .from('app_settings')
         .upsert({ key: 'initialCash', value: amount }, { onConflict: 'key' });
@@ -629,11 +836,133 @@ const App: React.FC = () => {
     if (error) {
         console.error("Error updating initial cash:", error);
         alert(`Gagal menyimpan kas awal: ${error.message}`);
-    } else {
-        // State will be updated by real-time subscription
-        alert("Kas awal berhasil diperbarui.");
     }
   }, []);
+
+  const handleUpdateCashDrawerInitial = useCallback(async (amount: number, periodStartDate?: string, notes?: string) => {
+    const startDate = periodStartDate || cashDrawerState.periodStartDate || getLocalToday();
+    const isStartDateChanged = startDate !== cashDrawerState.periodStartDate;
+    const nextState: CashDrawerState = {
+      periodStartDate: startDate,
+      periodStartAt: new Date().toISOString(),
+      openingCash: amount,
+      settledCashInOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashInOnStartDate || 0),
+      settledCashOutOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashOutOnStartDate || 0),
+      settledCashTransferInOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashTransferInOnStartDate || 0),
+      settledCashTransferOutOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashTransferOutOnStartDate || 0),
+    };
+
+    const newLog: CashDrawerLog = {
+      id: `LOG-${Date.now()}`,
+      type: 'Penyesuaian Kas Awal',
+      timestamp: new Date().toISOString(),
+      periodStartDate: startDate,
+      periodEndDate: getLocalToday(),
+      openingCash: amount,
+      cashInTotal: 0,
+      cashOutTotal: 0,
+      nonCashTotal: 0,
+      expectedCash: amount,
+      depositAmount: 0,
+      remainingCash: amount,
+      operator: profile?.name,
+      notes: notes || (isStartDateChanged ? `Atur kas awal & mulai hitung sejak ${startDate}` : 'Penyesuaian kas awal laci'),
+    };
+
+    const updatedLogs = [newLog, ...cashDrawerLogs];
+    setCashDrawerState(nextState);
+    setCashDrawerLogs(updatedLogs);
+    setInitialCash(amount);
+
+    const [res1, res2] = await Promise.all([
+      supabase.from('app_settings').upsert({ key: 'cashDrawerState', value: nextState }, { onConflict: 'key' }),
+      supabase.from('app_settings').upsert({ key: 'cashDrawerLogs', value: updatedLogs }, { onConflict: 'key' }),
+    ]);
+    if (res1.error || res2.error) {
+      alert(`Gagal menyimpan log kas awal: ${res1.error?.message || res2.error?.message}`);
+    } else {
+      alert("Kas awal laci berhasil diperbarui dan dicatat ke log.");
+    }
+  }, [cashDrawerState, cashDrawerLogs, profile]);
+
+  const handleSetorCash = useCallback(async (payload: {
+    depositAmount: number;
+    physicalCash?: number;
+    recipient: string;
+    depositToAccountId?: string;
+    depositToAccountName?: string;
+    notes?: string;
+    summary: {
+      periodStartDate: string;
+      periodEndDate: string;
+      openingCash: number;
+      cashInTotal: number;
+      cashOutTotal: number;
+      nonCashTotal: number;
+      expectedCash: number;
+      rawCashInToday: number;
+      rawCashOutToday: number;
+      rawTransferInToday: number;
+      rawTransferOutToday: number;
+      breakdownByMethod: Record<string, number>;
+    };
+  }) => {
+    const todayLocal = getLocalToday();
+    const baseCash = payload.physicalCash !== undefined ? payload.physicalCash : payload.summary.expectedCash;
+    const remainingCash = Math.max(0, baseCash - payload.depositAmount);
+    const discrepancy = payload.physicalCash !== undefined ? payload.physicalCash - payload.summary.expectedCash : undefined;
+
+    const newLog: CashDrawerLog = {
+      id: `SETOR-${Date.now()}`,
+      type: 'Setor',
+      timestamp: new Date().toISOString(),
+      periodStartDate: payload.summary.periodStartDate,
+      periodEndDate: payload.summary.periodEndDate,
+      openingCash: payload.summary.openingCash,
+      cashInTotal: payload.summary.cashInTotal,
+      cashOutTotal: payload.summary.cashOutTotal,
+      nonCashTotal: payload.summary.nonCashTotal,
+      expectedCash: payload.summary.expectedCash,
+      physicalCash: payload.physicalCash,
+      discrepancy,
+      depositAmount: payload.depositAmount,
+      remainingCash,
+      recipient: payload.recipient,
+      depositToAccountId: payload.depositToAccountId,
+      depositToAccountName: payload.depositToAccountName,
+      operator: profile?.name,
+      notes: payload.notes,
+      breakdownByMethod: payload.summary.breakdownByMethod,
+    };
+
+    const nextState: CashDrawerState = {
+      periodStartDate: todayLocal,
+      periodStartAt: new Date().toISOString(),
+      openingCash: remainingCash,
+      settledCashInOnStartDate: payload.summary.rawCashInToday,
+      settledCashOutOnStartDate: payload.summary.rawCashOutToday,
+      settledCashTransferInOnStartDate: payload.summary.rawTransferInToday,
+      settledCashTransferOutOnStartDate: payload.summary.rawTransferOutToday,
+    };
+
+    const updatedLogs = [newLog, ...cashDrawerLogs];
+    setCashDrawerState(nextState);
+    setCashDrawerLogs(updatedLogs);
+    setInitialCash(remainingCash);
+
+    const [res1, res2, res3] = await Promise.all([
+      supabase.from('app_settings').upsert({ key: 'cashDrawerState', value: nextState }, { onConflict: 'key' }),
+      supabase.from('app_settings').upsert({ key: 'cashDrawerLogs', value: updatedLogs }, { onConflict: 'key' }),
+      supabase.from('app_settings').upsert({ key: 'initialCash', value: remainingCash }, { onConflict: 'key' }),
+    ]);
+
+    if (res1.error || res2.error || res3.error) {
+      alert(`Gagal menyimpan setoran kas: ${res1.error?.message || res2.error?.message || res3.error?.message}`);
+    } else {
+      const targetInfo = payload.depositToAccountName ? ` ke rekening ${payload.depositToAccountName}` : '';
+      alert(`Setor ke ${payload.recipient}${targetInfo} berhasil dicatat! Sisa modal di laci: Rp ${remainingCash.toLocaleString('id-ID')}`);
+    }
+  }, [cashDrawerLogs, profile]);
 
   const handleSaveFinishingSpaceRules = useCallback(async (newRules: FinishingSpaceRule[]) => {
     setFinishingSpaceRules(newRules);
@@ -929,10 +1258,650 @@ const App: React.FC = () => {
     await Promise.all(operations);
   }, [receivables, allOrders, paymentMethods, notificationSettings]);
 
-  const handleAddExpense = useCallback(async (newExpense: Omit<ExpenseItem, 'id'>) => {
-    const { error } = await supabase.from('expenses').insert(newExpense);
-    if (error) { alert(`Gagal tambah pengeluaran: ${error?.message}`); }
+  const saveAppSetting = useCallback(async (key: string, value: any) => {
+    const { error } = await supabase.from('app_settings').upsert({ key, value }, { onConflict: 'key' });
+    if (error) {
+      console.error(`Error saving setting ${key}:`, error);
+      alert(`Gagal menyimpan ${key}: ${error.message}`);
+      return false;
+    }
+    return true;
   }, []);
+
+  const handleAddExpense = useCallback(async (newExpense: Omit<ExpenseItem, 'id'>, metadata?: ExpenseMetadata) => {
+    const { data, error } = await supabase.from('expenses').insert(newExpense).select().single();
+    if (error) {
+      alert(`Gagal tambah pengeluaran: ${error.message}`);
+      return;
+    }
+    if (data && metadata) {
+      const updatedMeta = {
+        ...expenseMetadata,
+        [data.id]: { ...metadata, createdBy: profile?.name },
+      };
+      setExpenseMetadata(updatedMeta);
+      await saveAppSetting('expenseMetadata', updatedMeta);
+    }
+  }, [expenseMetadata, profile, saveAppSetting]);
+
+  // --- Purchases / Barang Masuk Handlers ---
+  const handleAddPurchase = useCallback(async (payload: {
+    invoiceNumber: string;
+    date: string;
+    supplierId: number;
+    supplierName: string;
+    items: PurchaseItem[];
+    totalAmount: number;
+    paymentType: 'Lunas' | 'Kredit';
+    fundingSource: ExpenseFundingSource;
+    fundingAccountId?: string;
+    fundingAccountName?: string;
+    dpAmount: number;
+    dueDate: string;
+    notes: string;
+  }): Promise<boolean> => {
+    const purchaseId = `PB-${Date.now()}`;
+    let createdExpenseId: number | undefined;
+    let createdBillId: string | undefined;
+
+    // 1. Pembelian tetap mengambil list barang dari Stok/Inventori namun tidak mengubah angka stok fisik (stok dikelola manual)
+    const itemSummary = payload.items.map(i => `${i.itemName} (${i.qty} ${i.unit})`).join(', ');
+
+    // 2. Payment Handling: Lunas -> Operational Expense | Kredit -> DP Expense (if > 0) + Supplier Bill
+    if (payload.paymentType === 'Lunas') {
+      const { data: expData, error: expErr } = await supabase
+        .from('expenses')
+        .insert({
+          name: `Pembelian Bahan: ${payload.supplierName} (${payload.invoiceNumber})`,
+          category: 'Bahan Cetak, Kertas, Tinta, Dll',
+          amount: payload.totalAmount,
+          date: payload.date,
+        })
+        .select()
+        .single();
+      if (expErr) {
+        alert(`Stok bertambah, tapi gagal mencatat ke Pengeluaran Operasional: ${expErr.message}`);
+      } else if (expData) {
+        createdExpenseId = expData.id;
+        const updatedMeta = {
+          ...expenseMetadata,
+          [expData.id]: {
+            fundingSource: payload.fundingSource,
+            fundingAccountId: payload.fundingAccountId,
+            fundingAccountName: payload.fundingAccountName,
+            purchaseId,
+            notes: itemSummary,
+            createdBy: profile?.name,
+          },
+        };
+        setExpenseMetadata(updatedMeta);
+        await saveAppSetting('expenseMetadata', updatedMeta);
+      }
+    } else {
+      // Kredit / Tempo
+      const billId = `BILL-${Date.now()}`;
+      createdBillId = billId;
+      const initialPayments = [];
+      if (payload.dpAmount > 0) {
+        initialPayments.push({
+          id: `PAY-${Date.now()}`,
+          date: payload.date,
+          amount: payload.dpAmount,
+          fundingSource: payload.fundingSource as InstallmentFundingSource,
+          fundingAccountId: payload.fundingAccountId,
+          fundingAccountName: payload.fundingAccountName,
+          notes: `DP Barang Masuk (${payload.invoiceNumber})`,
+          paidBy: profile?.name,
+        });
+      }
+      const newBill: SupplierBill = {
+        id: billId,
+        purchaseId,
+        invoiceNumber: payload.invoiceNumber,
+        supplierId: payload.supplierId,
+        supplierName: payload.supplierName,
+        description: itemSummary,
+        date: payload.date,
+        dueDate: payload.dueDate,
+        totalAmount: payload.totalAmount,
+        payments: initialPayments,
+        status: payload.dpAmount >= payload.totalAmount ? 'Lunas' : 'Belum Lunas',
+        notes: payload.notes || undefined,
+      };
+      const updatedBills = [newBill, ...supplierBills];
+      setSupplierBills(updatedBills);
+      await saveAppSetting('supplierBills', updatedBills);
+    }
+
+    // 3. Save PurchaseRecord
+    const newPurchase: PurchaseRecord = {
+      id: purchaseId,
+      invoiceNumber: payload.invoiceNumber,
+      date: payload.date,
+      supplierId: payload.supplierId,
+      supplierName: payload.supplierName,
+      items: payload.items,
+      totalAmount: payload.totalAmount,
+      paymentType: payload.paymentType,
+      fundingSource: payload.fundingSource,
+      fundingAccountId: payload.fundingAccountId,
+      fundingAccountName: payload.fundingAccountName,
+      dpAmount: payload.dpAmount,
+      dueDate: payload.dueDate,
+      expenseId: createdExpenseId,
+      supplierBillId: createdBillId,
+      notes: payload.notes || undefined,
+      createdBy: profile?.name,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedPurchases = [newPurchase, ...purchases];
+    setPurchases(updatedPurchases);
+    await saveAppSetting('purchases', updatedPurchases);
+    alert('Pembelian / barang masuk berhasil dicatat ke keuangan (stok inventori dikelola manual).');
+    return true;
+  }, [expenseMetadata, supplierBills, purchases, profile, saveAppSetting]);
+
+  const handleDeletePurchase = useCallback(async (purchase: PurchaseRecord) => {
+    // 1. Stok inventori dikelola manual sehingga penghapusan pembelian tidak mengubah angka stok
+    // 2. Remove linked operational expense if Lunas
+    if (purchase.expenseId) {
+      await supabase.from('expenses').delete().eq('id', purchase.expenseId);
+      if (expenseMetadata[purchase.expenseId]) {
+        const updatedMeta = { ...expenseMetadata };
+        delete updatedMeta[purchase.expenseId];
+        setExpenseMetadata(updatedMeta);
+        await saveAppSetting('expenseMetadata', updatedMeta);
+      }
+    }
+    // 3. Remove linked supplier bill if Kredit
+    if (purchase.supplierBillId) {
+      const updatedBills = supplierBills.filter(b => b.id !== purchase.supplierBillId);
+      setSupplierBills(updatedBills);
+      await saveAppSetting('supplierBills', updatedBills);
+    }
+    // 4. Remove purchase record
+    const updatedPurchases = purchases.filter(p => p.id !== purchase.id);
+    setPurchases(updatedPurchases);
+    await saveAppSetting('purchases', updatedPurchases);
+  }, [expenseMetadata, supplierBills, purchases, saveAppSetting]);
+
+  // --- Supplier Bills Handlers ---
+  const handleAddSupplierBill = useCallback(async (
+    billData: Omit<SupplierBill, 'id' | 'payments' | 'status'> & {
+      priorPaidAmount?: number;
+      priorPaidDate?: string;
+      priorPaidNotes?: string;
+    }
+  ) => {
+    const { priorPaidAmount, priorPaidDate, priorPaidNotes, ...rest } = billData;
+    const priorAmt = Number(priorPaidAmount || 0);
+    const initialPayments: BillPayment[] = priorAmt > 0
+      ? [{
+          id: `PAY-MIG-${Date.now()}`,
+          date: priorPaidDate || rest.date,
+          amount: priorAmt,
+          fundingSource: 'Sistem Lama (Sudah Tercatat)',
+          notes: priorPaidNotes?.trim() || 'Cicilan sudah tercatat di pengeluaran sistem lama',
+          paidBy: profile?.name,
+        }]
+      : [];
+    const totalPaid = initialPayments.reduce((s, p) => s + p.amount, 0);
+    const newBill: SupplierBill = {
+      ...rest,
+      id: `BILL-${Date.now()}`,
+      payments: initialPayments,
+      status: totalPaid >= rest.totalAmount ? 'Lunas' : 'Belum Lunas',
+    };
+    const updated = [newBill, ...supplierBills];
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, profile, saveAppSetting]);
+
+  const handleAddSupplierBillsBatch = useCallback(async (
+    billsData: Array<Omit<SupplierBill, 'id' | 'payments' | 'status'> & {
+      priorPaidAmount?: number;
+      priorPaidDate?: string;
+      priorPaidNotes?: string;
+    }>
+  ) => {
+    if (billsData.length === 0) return;
+    const baseTs = Date.now();
+    const createdBills: SupplierBill[] = billsData.map((billData, idx) => {
+      const { priorPaidAmount, priorPaidDate, priorPaidNotes, ...rest } = billData;
+      const priorAmt = Number(priorPaidAmount || 0);
+      const initialPayments: BillPayment[] = priorAmt > 0
+        ? [{
+            id: `PAY-MIG-${baseTs}-${idx}`,
+            date: priorPaidDate || rest.date,
+            amount: priorAmt,
+            fundingSource: 'Sistem Lama (Sudah Tercatat)',
+            notes: priorPaidNotes?.trim() || 'Cicilan sudah tercatat di pengeluaran sistem lama',
+            paidBy: profile?.name,
+          }]
+        : [];
+      const totalPaid = initialPayments.reduce((s, p) => s + p.amount, 0);
+      return {
+        ...rest,
+        id: `BILL-${baseTs}-${idx}`,
+        payments: initialPayments,
+        status: totalPaid >= rest.totalAmount ? 'Lunas' : 'Belum Lunas',
+      };
+    });
+    const updated = [...createdBills, ...supplierBills];
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, profile, saveAppSetting]);
+
+  const handleUpdateSupplierBill = useCallback(async (updatedBill: SupplierBill) => {
+    const updated = supplierBills.map(bill => {
+      if (bill.id !== updatedBill.id) return bill;
+      const totalPaid = bill.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      return {
+        ...bill,
+        invoiceNumber: updatedBill.invoiceNumber,
+        supplierId: updatedBill.supplierId,
+        supplierName: updatedBill.supplierName,
+        description: updatedBill.description,
+        date: updatedBill.date,
+        dueDate: updatedBill.dueDate,
+        totalAmount: updatedBill.totalAmount,
+        notes: updatedBill.notes,
+        status: totalPaid >= updatedBill.totalAmount ? ('Lunas' as const) : ('Belum Lunas' as const),
+      };
+    });
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, saveAppSetting]);
+
+  const handlePaySupplierBill = useCallback(async (
+    billId: string,
+    payment: {
+      date: string;
+      amount: number;
+      fundingSource: InstallmentFundingSource;
+      fundingAccountId?: string;
+      fundingAccountName?: string;
+      notes?: string;
+    }
+  ) => {
+    const updated = supplierBills.map(bill => {
+      if (bill.id !== billId) return bill;
+      const newPayment = {
+        id: `PAY-${Date.now()}`,
+        ...payment,
+        paidBy: profile?.name,
+      };
+      const newPayments = [...bill.payments, newPayment];
+      const totalPaid = newPayments.reduce((s, p) => s + p.amount, 0);
+      return {
+        ...bill,
+        payments: newPayments,
+        status: totalPaid >= bill.totalAmount ? ('Lunas' as const) : ('Belum Lunas' as const),
+      };
+    });
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, profile, saveAppSetting]);
+
+  const handleBulkPaySupplierBills = useCallback(async (payload: {
+    allocations: Array<{ billId: string; amount: number }>;
+    date: string;
+    fundingSource: InstallmentFundingSource;
+    fundingAccountId?: string;
+    fundingAccountName?: string;
+    notes?: string;
+  }) => {
+    const validAllocations = payload.allocations.filter(a => a.amount > 0);
+    if (validAllocations.length === 0) return;
+    const allocMap = new Map<string, number>();
+    validAllocations.forEach(a => {
+      allocMap.set(a.billId, (allocMap.get(a.billId) || 0) + a.amount);
+    });
+    const baseTs = Date.now();
+    const isMulti = allocMap.size > 1;
+    let idx = 0;
+
+    const updated = supplierBills.map(bill => {
+      const payAmt = allocMap.get(bill.id);
+      if (!payAmt || payAmt <= 0) return bill;
+      const newPayment: BillPayment = {
+        id: `PAY-${baseTs}-${idx++}`,
+        date: payload.date,
+        amount: payAmt,
+        fundingSource: payload.fundingSource,
+        fundingAccountId: payload.fundingAccountId,
+        fundingAccountName: payload.fundingAccountName,
+        notes: payload.notes?.trim()
+          ? isMulti
+            ? `${payload.notes.trim()} (Multi-Nota)`
+            : payload.notes.trim()
+          : isMulti
+          ? 'Pembayaran Multi-Nota'
+          : undefined,
+        paidBy: profile?.name,
+      };
+      const newPayments = [...bill.payments, newPayment];
+      const totalPaid = newPayments.reduce((s, p) => s + p.amount, 0);
+      return {
+        ...bill,
+        payments: newPayments,
+        status: totalPaid >= bill.totalAmount ? ('Lunas' as const) : ('Belum Lunas' as const),
+      };
+    });
+
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, profile, saveAppSetting]);
+
+  const handleUpdateSupplierBillPayment = useCallback(async (
+    billId: string,
+    paymentId: string,
+    payment: {
+      date: string;
+      amount: number;
+      fundingSource: InstallmentFundingSource;
+      fundingAccountId?: string;
+      fundingAccountName?: string;
+      notes?: string;
+    }
+  ) => {
+    const updated = supplierBills.map(bill => {
+      if (bill.id !== billId) return bill;
+      const newPayments = bill.payments.map(p =>
+        p.id === paymentId ? { ...p, ...payment } : p
+      );
+      const totalPaid = newPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      return {
+        ...bill,
+        payments: newPayments,
+        status: totalPaid >= bill.totalAmount ? ('Lunas' as const) : ('Belum Lunas' as const),
+      };
+    });
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, saveAppSetting]);
+
+  const handleDeleteSupplierBillPayment = useCallback(async (billId: string, paymentId: string) => {
+    const updated = supplierBills.map(bill => {
+      if (bill.id !== billId) return bill;
+      const newPayments = bill.payments.filter(p => p.id !== paymentId);
+      const totalPaid = newPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
+      return {
+        ...bill,
+        payments: newPayments,
+        status: totalPaid >= bill.totalAmount ? ('Lunas' as const) : ('Belum Lunas' as const),
+      };
+    });
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, saveAppSetting]);
+
+  const handleDeleteSupplierBill = useCallback(async (billId: string) => {
+    const updated = supplierBills.filter(b => b.id !== billId);
+    setSupplierBills(updated);
+    await saveAppSetting('supplierBills', updated);
+  }, [supplierBills, saveAppSetting]);
+
+  // --- Bank Installments Handlers (Synced with Debts) ---
+  const handleAddBankInstallment = useCallback(async (payload: {
+    debtId?: number;
+    syncToDebts: boolean;
+    name: string;
+    creditLimit: number;
+    remainingPrincipal: number;
+    dueDayOfMonth?: number;
+    nextDueDate?: string;
+    notes?: string;
+  }) => {
+    let linkedDebtId = payload.debtId;
+    if (!linkedDebtId && payload.syncToDebts) {
+      const { data: debtData, error: debtErr } = await supabase
+        .from('debts')
+        .insert({ name: payload.name, value: payload.remainingPrincipal })
+        .select()
+        .single();
+      if (!debtErr && debtData) {
+        linkedDebtId = debtData.id;
+      }
+    }
+
+    const newInstallment: BankInstallment = {
+      id: `BANK-${Date.now()}`,
+      debtId: linkedDebtId,
+      name: payload.name,
+      creditLimit: payload.creditLimit,
+      remainingPrincipal: payload.remainingPrincipal,
+      dueDayOfMonth: payload.dueDayOfMonth,
+      nextDueDate: payload.nextDueDate,
+      notes: payload.notes,
+      payments: [],
+      status: payload.remainingPrincipal <= 0 ? 'Lunas' : 'Aktif',
+    };
+    const updated = [newInstallment, ...bankInstallments];
+    setBankInstallments(updated);
+    await saveAppSetting('bankInstallments', updated);
+  }, [bankInstallments, saveAppSetting]);
+
+  const handleUpdateBankInstallment = useCallback(async (updatedInst: BankInstallment) => {
+    let targetDebtId: number | undefined;
+    const newRemaining = Math.max(0, Number(updatedInst.remainingPrincipal || 0));
+
+    const updated = bankInstallments.map(inst => {
+      if (inst.id !== updatedInst.id) return inst;
+      targetDebtId = inst.debtId;
+      return {
+        ...inst,
+        name: updatedInst.name,
+        creditLimit: Number(updatedInst.creditLimit || 0),
+        remainingPrincipal: newRemaining,
+        nextDueDate: updatedInst.nextDueDate,
+        notes: updatedInst.notes,
+        status: newRemaining <= 0 ? ('Lunas' as const) : ('Aktif' as const),
+      };
+    });
+
+    setBankInstallments(updated);
+    await saveAppSetting('bankInstallments', updated);
+
+    if (targetDebtId) {
+      await supabase.from('debts').update({ name: updatedInst.name, value: newRemaining }).eq('id', targetDebtId);
+    }
+  }, [bankInstallments, saveAppSetting]);
+
+  const handlePayBankInstallment = useCallback(async (
+    installmentId: string,
+    payment: {
+      date: string;
+      totalPaid: number;
+      principalPaid: number;
+      interestPaid: number;
+      fundingSource: InstallmentFundingSource;
+      fundingAccountId?: string;
+      fundingAccountName?: string;
+      nextDueDate?: string;
+      notes?: string;
+    }
+  ) => {
+    let targetDebtId: number | undefined;
+    let newRemaining = 0;
+
+    const updated = bankInstallments.map(inst => {
+      if (inst.id !== installmentId) return inst;
+      targetDebtId = inst.debtId;
+      newRemaining = Math.max(0, inst.remainingPrincipal - payment.principalPaid);
+      const newPay = {
+        id: `BPAY-${Date.now()}`,
+        date: payment.date,
+        totalPaid: payment.totalPaid,
+        principalPaid: payment.principalPaid,
+        interestPaid: payment.interestPaid,
+        fundingSource: payment.fundingSource,
+        fundingAccountId: payment.fundingAccountId,
+        fundingAccountName: payment.fundingAccountName,
+        notes: payment.notes,
+        paidBy: profile?.name,
+      };
+      return {
+        ...inst,
+        remainingPrincipal: newRemaining,
+        nextDueDate: payment.nextDueDate !== undefined ? payment.nextDueDate : inst.nextDueDate,
+        payments: [...inst.payments, newPay],
+        status: newRemaining <= 0 ? ('Lunas' as const) : ('Aktif' as const),
+      };
+    });
+
+    setBankInstallments(updated);
+    await saveAppSetting('bankInstallments', updated);
+
+    if (targetDebtId) {
+      await supabase.from('debts').update({ value: newRemaining }).eq('id', targetDebtId);
+    }
+  }, [bankInstallments, profile, saveAppSetting]);
+
+  const handleUpdateBankInstallmentPayment = useCallback(async (
+    installmentId: string,
+    paymentId: string,
+    payment: {
+      date: string;
+      totalPaid: number;
+      principalPaid: number;
+      interestPaid: number;
+      fundingSource: InstallmentFundingSource;
+      fundingAccountId?: string;
+      fundingAccountName?: string;
+      notes?: string;
+    }
+  ) => {
+    let targetDebtId: number | undefined;
+    let newRemaining = 0;
+
+    const updated = bankInstallments.map(inst => {
+      if (inst.id !== installmentId) return inst;
+      const oldPay = inst.payments.find(p => p.id === paymentId);
+      if (!oldPay) return inst;
+      targetDebtId = inst.debtId;
+      const principalDiff = Number(payment.principalPaid || 0) - Number(oldPay.principalPaid || 0);
+      newRemaining = Math.max(0, Number(inst.remainingPrincipal || 0) - principalDiff);
+      const newPayments = inst.payments.map(p =>
+        p.id === paymentId ? { ...p, ...payment } : p
+      );
+      return {
+        ...inst,
+        remainingPrincipal: newRemaining,
+        payments: newPayments,
+        status: newRemaining <= 0 ? ('Lunas' as const) : ('Aktif' as const),
+      };
+    });
+
+    setBankInstallments(updated);
+    await saveAppSetting('bankInstallments', updated);
+
+    if (targetDebtId) {
+      await supabase.from('debts').update({ value: newRemaining }).eq('id', targetDebtId);
+    }
+  }, [bankInstallments, saveAppSetting]);
+
+  const handleDeleteBankInstallmentPayment = useCallback(async (installmentId: string, paymentId: string) => {
+    let targetDebtId: number | undefined;
+    let newRemaining = 0;
+
+    const updated = bankInstallments.map(inst => {
+      if (inst.id !== installmentId) return inst;
+      const oldPay = inst.payments.find(p => p.id === paymentId);
+      if (!oldPay) return inst;
+      targetDebtId = inst.debtId;
+      newRemaining = Math.max(0, Number(inst.remainingPrincipal || 0) + Number(oldPay.principalPaid || 0));
+      const newPayments = inst.payments.filter(p => p.id !== paymentId);
+      return {
+        ...inst,
+        remainingPrincipal: newRemaining,
+        payments: newPayments,
+        status: newRemaining <= 0 ? ('Lunas' as const) : ('Aktif' as const),
+      };
+    });
+
+    setBankInstallments(updated);
+    await saveAppSetting('bankInstallments', updated);
+
+    if (targetDebtId) {
+      await supabase.from('debts').update({ value: newRemaining }).eq('id', targetDebtId);
+    }
+  }, [bankInstallments, saveAppSetting]);
+
+  const handleDeleteBankInstallment = useCallback(async (installmentId: string) => {
+    const updated = bankInstallments.filter(b => b.id !== installmentId);
+    setBankInstallments(updated);
+    await saveAppSetting('bankInstallments', updated);
+  }, [bankInstallments, saveAppSetting]);
+
+  // --- Private / Non-Operational Expenses Handlers ---
+  const handleAddPrivateExpense = useCallback(async (item: Omit<PrivateExpenseItem, 'id'>) => {
+    const newItem: PrivateExpenseItem = {
+      ...item,
+      id: `PRIV-${Date.now()}`,
+      createdBy: profile?.name,
+    };
+    const updated = [newItem, ...privateExpenses];
+    setPrivateExpenses(updated);
+    await saveAppSetting('privateExpenses', updated);
+  }, [privateExpenses, profile, saveAppSetting]);
+
+  const handleUpdatePrivateExpense = useCallback(async (updatedItem: PrivateExpenseItem) => {
+    const updated = privateExpenses.map(p => (p.id === updatedItem.id ? { ...p, ...updatedItem } : p));
+    setPrivateExpenses(updated);
+    await saveAppSetting('privateExpenses', updated);
+  }, [privateExpenses, saveAppSetting]);
+
+  const handleToggleReimbursePrivateExpense = useCallback(async (id: string) => {
+    const updated = privateExpenses.map(p => (p.id === id ? { ...p, reimbursed: !p.reimbursed } : p));
+    setPrivateExpenses(updated);
+    await saveAppSetting('privateExpenses', updated);
+  }, [privateExpenses, saveAppSetting]);
+
+  const handleDeletePrivateExpense = useCallback(async (id: string) => {
+    const updated = privateExpenses.filter(p => p.id !== id);
+    setPrivateExpenses(updated);
+    await saveAppSetting('privateExpenses', updated);
+  }, [privateExpenses, saveAppSetting]);
+
+  // --- Mutasi Antar Akun & Rekonsiliasi Saldo ---
+  const handleAddCashTransfer = useCallback(async (payload: Omit<CashTransferRecord, 'id' | 'timestamp' | 'createdBy'>) => {
+    const newTransfer: CashTransferRecord = {
+      ...payload,
+      id: `TRF-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      createdBy: profile?.name,
+    };
+    const updated = [newTransfer, ...cashTransfers];
+    setCashTransfers(updated);
+    const ok = await saveAppSetting('cashTransfers', updated);
+    if (ok) {
+      alert('Mutasi dana berhasil dicatat.');
+    }
+  }, [cashTransfers, profile, saveAppSetting]);
+
+  const handleDeleteCashTransfer = useCallback(async (id: string) => {
+    const updated = cashTransfers.filter(t => t.id !== id);
+    setCashTransfers(updated);
+    await saveAppSetting('cashTransfers', updated);
+  }, [cashTransfers, saveAppSetting]);
+
+  const handleSaveAccountBalanceMeta = useCallback(async (methodId: string, meta: AccountBalanceMeta) => {
+    const nextMeta: AccountBalanceMeta = {
+      ...meta,
+      lastRealCheckedBy: meta.lastRealBalance !== undefined ? (profile?.name || meta.lastRealCheckedBy) : meta.lastRealCheckedBy,
+    };
+    const updated = {
+      ...accountBalancesMeta,
+      [methodId]: nextMeta,
+    };
+    setAccountBalancesMeta(updated);
+    const ok = await saveAppSetting('accountBalancesMeta', updated);
+    if (ok) {
+      alert('Saldo awal & rekonsiliasi saldo real berhasil disimpan.');
+    }
+  }, [accountBalancesMeta, profile, saveAppSetting]);
   
   const handleProductionMove = useCallback(async (orderId: string, from: ProductionStatus, to: ProductionStatus) => {
     const statusMap: Record<ProductionStatus, ProductionStatusDisplay> = { queue: 'Dalam Antrian', printing: 'Proses Cetak', warehouse: 'Siap Ambil', delivered: 'Telah Dikirim' };
@@ -955,15 +1924,56 @@ const App: React.FC = () => {
     if (error) { alert(`Gagal batal antrian: ${error.message}`); }
   }, []);
 
+  const handleConfirmInventoryCheck = useCallback(async (category?: InventoryCategory | 'Semua') => {
+      const nowIso = new Date().toISOString();
+      const actor = profile?.name || 'Petugas';
+      const nextByCategory = { ...(inventoryCheckStatus.byCategory || {}) };
+      if (!category || category === 'Semua') {
+          (['Bahan Baku', 'ATK', 'Kebersihan', 'Lain-Lain'] as InventoryCategory[]).forEach(cat => {
+              nextByCategory[cat] = { checkedAt: nowIso, checkedBy: actor };
+          });
+      } else {
+          nextByCategory[category] = { checkedAt: nowIso, checkedBy: actor };
+      }
+      const nextStatus: InventoryCheckStatus = {
+          lastCheckedAt: nowIso,
+          lastCheckedBy: actor,
+          byCategory: nextByCategory,
+      };
+      setInventoryCheckStatus(nextStatus);
+      await saveAppSetting('inventoryCheckStatus', nextStatus);
+  }, [inventoryCheckStatus, profile, saveAppSetting]);
+
   const handleUseStock = useCallback(async (itemId: number, amountUsed: number, usageDate: string) => {
       const item = inventory.find(i => i.id === itemId);
       if (!item) return;
-      const newStock = item.stock - amountUsed;
+      const newStock = Math.max(0, Number((item.stock - amountUsed).toFixed(2)));
       const newHistory: StockUsageRecord = { date: usageDate, amountUsed };
       const updatedHistory = [...(item.usageHistory || []), newHistory];
       const { error } = await supabase.from('inventory').update({ stock: newStock, usageHistory: updatedHistory }).eq('id', itemId);
-      if (error) { alert(`Gagal update stok: ${error.message}`); }
-  }, [inventory]);
+      if (error) {
+          alert(`Gagal update stok: ${error.message}`);
+          return;
+      }
+      setInventory(prev => prev.map(i => (i.id === itemId ? { ...i, stock: newStock, usageHistory: updatedHistory } : i)));
+      const nowIso = new Date().toISOString();
+      const actor = profile?.name || 'Petugas';
+      const existingMeta = inventoryMetadata[itemId];
+      const category: InventoryCategory = existingMeta?.category || 'Bahan Baku';
+      const updatedMeta: Record<number, InventoryItemMeta> = {
+          ...inventoryMetadata,
+          [itemId]: {
+              category,
+              condition: existingMeta?.condition || 'Baik',
+              notes: existingMeta?.notes,
+              updatedAt: nowIso,
+              updatedBy: actor,
+          },
+      };
+      setInventoryMetadata(updatedMeta);
+      await saveAppSetting('inventoryMetadata', updatedMeta);
+      await handleConfirmInventoryCheck(category);
+  }, [inventory, inventoryMetadata, profile, saveAppSetting, handleConfirmInventoryCheck]);
 
     const genericAddHandler = useCallback(async (table: string, newItem: any) => {
         const { error } = await supabase.from(table).insert(newItem);
@@ -989,9 +1999,90 @@ const App: React.FC = () => {
 
   const handleUpdateProduct = (p: ProductData) => genericUpdateHandler('products', p);
   const handleDeleteProduct = (id: number) => genericDeleteHandler('products', id);
-  const handleUpdateInventoryItem = (i: InventoryItem) => genericUpdateHandler('inventory', i);
-  const handleAddInventoryItem = (i: Omit<InventoryItem, 'id'>) => genericAddHandler('inventory', i);
-  const handleDeleteInventoryItem = (id: number) => genericDeleteHandler('inventory', id);
+
+  const handleAddInventoryItem = useCallback(async (
+      newItem: Omit<InventoryItem, 'id'>,
+      meta?: Partial<InventoryItemMeta>
+  ) => {
+      const { data, error } = await supabase.from('inventory').insert(newItem).select().single();
+      if (error) {
+          alert(`Gagal menambah barang inventori: ${error.message}`);
+          return;
+      }
+      const nowIso = new Date().toISOString();
+      const actor = profile?.name || 'Petugas';
+      const category: InventoryCategory = meta?.category || 'Bahan Baku';
+      if (data) {
+          setInventory(prev => (prev.some(i => i.id === data.id) ? prev : [...prev, data as InventoryItem]));
+          const updatedMeta: Record<number, InventoryItemMeta> = {
+              ...inventoryMetadata,
+              [data.id]: {
+                  category,
+                  condition: meta?.condition || 'Baik',
+                  notes: meta?.notes || undefined,
+                  updatedAt: nowIso,
+                  updatedBy: actor,
+              },
+          };
+          setInventoryMetadata(updatedMeta);
+          await saveAppSetting('inventoryMetadata', updatedMeta);
+      }
+      await handleConfirmInventoryCheck(category);
+  }, [inventoryMetadata, profile, saveAppSetting, handleConfirmInventoryCheck]);
+
+  const handleUpdateInventoryItem = useCallback(async (
+      updatedItem: InventoryItem,
+      meta?: Partial<InventoryItemMeta>
+  ) => {
+      const { error } = await supabase
+          .from('inventory')
+          .update({
+              name: updatedItem.name,
+              sku: updatedItem.sku,
+              stock: updatedItem.stock,
+              unit: updatedItem.unit,
+              type: updatedItem.type,
+              usageHistory: updatedItem.usageHistory,
+          })
+          .eq('id', updatedItem.id);
+      if (error) {
+          alert(`Gagal update barang inventori: ${error.message}`);
+          return;
+      }
+      setInventory(prev => prev.map(i => (i.id === updatedItem.id ? { ...i, ...updatedItem } : i)));
+      const nowIso = new Date().toISOString();
+      const actor = profile?.name || 'Petugas';
+      const existingMeta = inventoryMetadata[updatedItem.id];
+      const category: InventoryCategory = meta?.category || existingMeta?.category || 'Bahan Baku';
+      const updatedMeta: Record<number, InventoryItemMeta> = {
+          ...inventoryMetadata,
+          [updatedItem.id]: {
+              category,
+              condition: meta?.condition ?? existingMeta?.condition ?? 'Baik',
+              notes: meta !== undefined && 'notes' in meta ? (meta.notes || undefined) : existingMeta?.notes,
+              updatedAt: nowIso,
+              updatedBy: actor,
+          },
+      };
+      setInventoryMetadata(updatedMeta);
+      await saveAppSetting('inventoryMetadata', updatedMeta);
+      await handleConfirmInventoryCheck(category);
+  }, [inventoryMetadata, profile, saveAppSetting, handleConfirmInventoryCheck]);
+
+  const handleDeleteInventoryItem = useCallback(async (id: number) => {
+      const { error } = await supabase.from('inventory').delete().eq('id', id);
+      if (error) {
+          alert(`Gagal menghapus barang inventori: ${error.message}`);
+          return;
+      }
+      setInventory(prev => prev.filter(i => i.id !== id));
+      if (inventoryMetadata[id]) {
+          const updatedMeta = { ...inventoryMetadata };
+          delete updatedMeta[id];
+          setInventoryMetadata(updatedMeta);
+          await saveAppSetting('inventoryMetadata', updatedMeta);
+      }
+  }, [inventoryMetadata, saveAppSetting]);
   const handleUpdateCategory = (c: CategoryData) => genericUpdateHandler('categories', c);
   const handleDeleteCategory = (id: number) => genericDeleteHandler('categories', id);
   const handleUpdateFinishing = (f: FinishingData) => genericUpdateHandler('finishings', f);
@@ -1000,8 +2091,41 @@ const App: React.FC = () => {
   const handleDeleteCustomer = (id: number) => genericDeleteHandler('customers', id);
   const handleUpdateSupplier = (s: SupplierData) => genericUpdateHandler('suppliers', s);
   const handleDeleteSupplier = (id: number) => genericDeleteHandler('suppliers', id);
-  const handleUpdateExpense = (e: ExpenseItem) => genericUpdateHandler('expenses', e);
-  const handleDeleteExpense = (id: number) => genericDeleteHandler('expenses', id);
+  const handleUpdateExpense = useCallback(async (e: ExpenseItem, metadata?: ExpenseMetadata) => {
+    const { error } = await supabase.from('expenses').update(e).eq('id', e.id);
+    if (error) {
+      alert(`Gagal update pengeluaran: ${error.message}`);
+      return;
+    }
+    if (metadata) {
+      const existingMeta = expenseMetadata[e.id];
+      const updatedMeta = {
+        ...expenseMetadata,
+        [e.id]: {
+          ...existingMeta,
+          ...metadata,
+          purchaseId: existingMeta?.purchaseId,
+          createdBy: existingMeta?.createdBy || profile?.name,
+        },
+      };
+      setExpenseMetadata(updatedMeta);
+      await saveAppSetting('expenseMetadata', updatedMeta);
+    }
+  }, [expenseMetadata, profile, saveAppSetting]);
+
+  const handleDeleteExpense = useCallback(async (id: number) => {
+    const { error } = await supabase.from('expenses').delete().eq('id', id);
+    if (error) {
+      alert(`Gagal hapus data: ${error.message}`);
+      return;
+    }
+    if (expenseMetadata[id]) {
+      const updatedMeta = { ...expenseMetadata };
+      delete updatedMeta[id];
+      setExpenseMetadata(updatedMeta);
+      await saveAppSetting('expenseMetadata', updatedMeta);
+    }
+  }, [expenseMetadata, saveAppSetting]);
   const handleUpdateEmployee = (e: EmployeeData) => genericUpdateHandler('employees', e);
   const handleDeleteEmployee = (id: number) => genericDeleteHandler('employees', id);
   const handleAddSalary = (s: Omit<SalaryData, 'id'>) => genericAddHandler('salaries', s);
@@ -1130,16 +2254,18 @@ const App: React.FC = () => {
     }
     switch (activeMenu) {
       case 'dashboard': return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} legacyReceivables={legacyReceivables} />;
+      case 'cashFlow': return <CashFlow receivables={receivables} expenses={expenses} expenseMetadata={expenseMetadata} supplierBills={supplierBills} bankInstallments={bankInstallments} privateExpenses={privateExpenses} paymentMethods={paymentMethods} cashDrawerState={cashDrawerState} cashDrawerLogs={cashDrawerLogs} cashTransfers={cashTransfers} accountBalancesMeta={accountBalancesMeta} legacyMonthlyIncomes={legacyMonthlyIncomes} legacyMonthlyExpenses={legacyMonthlyExpenses} onAddCashTransfer={handleAddCashTransfer} onDeleteCashTransfer={handleDeleteCashTransfer} onSaveAccountBalanceMeta={handleSaveAccountBalanceMeta} />;
       case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} receivables={receivables} profile={profile} onSaveLegacyOrder={handleSaveLegacyOrder} />;
-      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} legacyReceivables={legacyReceivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onPayLegacyReceivable={handlePayLegacyReceivable} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} initialCash={initialCash} onUpdateInitialCash={handleUpdateInitialCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
-      case 'expenses': return <Expenses expenses={expenses} onAddExpense={handleAddExpense} />;
-      case 'inventory': return <Inventory inventory={inventory} onUseStock={handleUseStock} notificationSettings={notificationSettings} />;
+      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} legacyReceivables={legacyReceivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onPayLegacyReceivable={handlePayLegacyReceivable} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} expenseMetadata={expenseMetadata} supplierBills={supplierBills} bankInstallments={bankInstallments} privateExpenses={privateExpenses} initialCash={initialCash} cashDrawerState={cashDrawerState} cashDrawerLogs={cashDrawerLogs} cashTransfers={cashTransfers} currentUserName={profile?.name} onUpdateInitialCash={handleUpdateInitialCash} onUpdateCashDrawerInitial={handleUpdateCashDrawerInitial} onSetorCash={handleSetorCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
+      case 'expenses': return <Expenses expenses={expenses} expenseMetadata={expenseMetadata} suppliers={suppliers} supplierBills={supplierBills} debts={debts} bankInstallments={bankInstallments} privateExpenses={privateExpenses} paymentMethods={paymentMethods} storeInfo={storeInfo} menuPermissions={userPermissions} onAddExpense={handleAddExpense} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onAddSupplierBill={handleAddSupplierBill} onAddSupplierBillsBatch={handleAddSupplierBillsBatch} onUpdateSupplierBill={handleUpdateSupplierBill} onPaySupplierBill={handlePaySupplierBill} onBulkPaySupplierBills={handleBulkPaySupplierBills} onUpdateSupplierBillPayment={handleUpdateSupplierBillPayment} onDeleteSupplierBillPayment={handleDeleteSupplierBillPayment} onDeleteSupplierBill={handleDeleteSupplierBill} onAddBankInstallment={handleAddBankInstallment} onUpdateBankInstallment={handleUpdateBankInstallment} onPayBankInstallment={handlePayBankInstallment} onUpdateBankInstallmentPayment={handleUpdateBankInstallmentPayment} onDeleteBankInstallmentPayment={handleDeleteBankInstallmentPayment} onDeleteBankInstallment={handleDeleteBankInstallment} onAddPrivateExpense={handleAddPrivateExpense} onUpdatePrivateExpense={handleUpdatePrivateExpense} onToggleReimbursePrivateExpense={handleToggleReimbursePrivateExpense} onDeletePrivateExpense={handleDeletePrivateExpense} />;
+      case 'purchases': return <Purchases purchases={purchases} suppliers={suppliers} inventory={inventory} inventoryMetadata={inventoryMetadata} paymentMethods={paymentMethods} currentUserName={profile?.name} onAddPurchase={handleAddPurchase} onDeletePurchase={handleDeletePurchase} onAddInventoryItem={handleAddInventoryItem} />;
+      case 'inventory': return <Inventory inventory={inventory} purchases={purchases} inventoryMetadata={inventoryMetadata} inventoryCheckStatus={inventoryCheckStatus} onUseStock={handleUseStock} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} onConfirmInventoryCheck={handleConfirmInventoryCheck} notificationSettings={notificationSettings} />;
       case 'production': return <Production boardData={boardData} allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} onProductionMove={handleProductionMove} onDeliverOrder={handleDeliverOrder} onCancelQueue={handleCancelQueue} />;
       case 'printLayout': return <PrintLayout allOrders={allOrders} unprocessedOrders={unprocessedOrders} receivables={receivables} products={products} categories={categories} finishings={finishings} storeInfo={storeInfo} finishingSpaceRules={finishingSpaceRules} onSaveFinishingSpaceRules={handleSaveFinishingSpaceRules} />;
       case 'payroll': return <Payroll salaries={salaries} employees={employees} attendance={attendance} payrollRecords={payrollRecords} menuPermissions={userPermissions} onAddAttendance={handleAddAttendance} onUpdateAttendance={handleUpdateAttendance} onDeleteAttendance={handleDeleteAttendance} onBulkDeleteAttendance={handleBulkDeleteAttendance} onProcessPayroll={handleProcessPayroll} onUpdatePayroll={handleUpdatePayroll} onRevertPayroll={handleRevertPayroll} onDeletePayrollPermanently={handleDeletePayrollPermanently} />;
-      case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} onAddProduct={handleAddProduct} onAddCategory={handleAddCategory} onAddFinishing={handleAddFinishing} onAddCustomer={handleAddCustomer} onAddSupplier={handleAddSupplier} onAddEmployee={handleAddEmployee} />;
-      case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
-      case 'reports': return <Reports allOrders={allOrders} expenses={expenses} receivables={receivables} products={products} customers={customers} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyMonthlyIncomes={legacyMonthlyIncomes} legacyMonthlyExpenses={legacyMonthlyExpenses} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onAddLegacyMonthlyIncome={handleAddLegacyMonthlyIncome} onUpdateLegacyMonthlyIncome={handleUpdateLegacyMonthlyIncome} onDeleteLegacyMonthlyIncome={handleDeleteLegacyMonthlyIncome} onAddLegacyMonthlyExpense={handleAddLegacyMonthlyExpense} onUpdateLegacyMonthlyExpense={handleUpdateLegacyMonthlyExpense} onDeleteLegacyMonthlyExpense={handleDeleteLegacyMonthlyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onAddAsset={handleAddAsset} onUpdateAsset={handleUpdateAsset} onDeleteAsset={handleDeleteAsset} onAddDebt={handleAddDebt} onUpdateDebt={handleUpdateDebt} onDeleteDebt={handleDeleteDebt} />;
+      case 'masterData': return <MasterData products={products} categories={categories} finishings={finishings} customers={customers} suppliers={suppliers} employees={employees} menuPermissions={userPermissions} userLevel={profile?.level} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onAddCategory={handleAddCategory} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onAddFinishing={handleAddFinishing} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onAddCustomer={handleAddCustomer} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onAddSupplier={handleAddSupplier} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onAddEmployee={handleAddEmployee} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} />;
+      case 'managementData': return <Management allOrders={allOrders} products={products} finishings={finishings} customers={customers} categories={categories} inventory={inventory} inventoryMetadata={inventoryMetadata} suppliers={suppliers} expenses={expenses} employees={employees} salaries={salaries} menuPermissions={userPermissions} onUpdateOrder={handleUpdateOrder} onDeleteOrder={handleDeleteOrder} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory} onUpdateFinishing={handleUpdateFinishing} onDeleteFinishing={handleDeleteFinishing} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} onUpdateSupplier={handleUpdateSupplier} onDeleteSupplier={handleDeleteSupplier} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onUpdateEmployee={handleUpdateEmployee} onDeleteEmployee={handleDeleteEmployee} onAddSalary={handleAddSalary} onUpdateSalary={handleUpdateSalary} onDeleteSalary={handleDeleteSalary} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} />;
+      case 'reports': return <Reports allOrders={allOrders} expenses={expenses} supplierBills={supplierBills} bankInstallments={bankInstallments} privateExpenses={privateExpenses} cashDrawerLogs={cashDrawerLogs} cashTransfers={cashTransfers} receivables={receivables} products={products} customers={customers} suppliers={suppliers} paymentMethods={paymentMethods} inventory={inventory} categories={categories} finishings={finishings} menuPermissions={userPermissions} legacyMonthlyIncomes={legacyMonthlyIncomes} legacyMonthlyExpenses={legacyMonthlyExpenses} legacyReceivables={legacyReceivables} assets={assets} debts={debts} notificationSettings={notificationSettings} onAddLegacyMonthlyIncome={handleAddLegacyMonthlyIncome} onUpdateLegacyMonthlyIncome={handleUpdateLegacyMonthlyIncome} onDeleteLegacyMonthlyIncome={handleDeleteLegacyMonthlyIncome} onAddLegacyMonthlyExpense={handleAddLegacyMonthlyExpense} onUpdateLegacyMonthlyExpense={handleUpdateLegacyMonthlyExpense} onDeleteLegacyMonthlyExpense={handleDeleteLegacyMonthlyExpense} onAddLegacyReceivable={handleAddLegacyReceivable} onUpdateLegacyReceivable={handleUpdateLegacyReceivable} onDeleteLegacyReceivable={handleDeleteLegacyReceivable} onAddAsset={handleAddAsset} onUpdateAsset={handleUpdateAsset} onDeleteAsset={handleDeleteAsset} onAddDebt={handleAddDebt} onUpdateDebt={handleUpdateDebt} onDeleteDebt={handleDeleteDebt} />;
       case 'settings': return <Settings users={users} menuPermissions={menuPermissions} currentUser={profile} currentUserLevel={profile!.level} notificationSettings={notificationSettings} storeInfo={storeInfo} paymentMethods={paymentMethods} onAddUser={handleAddProfile} onUpdateUser={handleUpdateUser} onUpdateMenuPermissions={handleUpdateMenuPermissions} onUpdateNotificationSettings={handleUpdateNotificationSettings} onUpdateStoreInfo={handleUpdateStoreInfo} onUpdatePaymentMethods={handleUpdatePaymentMethods} />;
       default: return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} legacyReceivables={legacyReceivables} />;
     }

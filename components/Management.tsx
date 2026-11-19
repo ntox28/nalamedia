@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CustomerData, type CategoryData, type InventoryItem, type SupplierData, type ExpenseItem, type EmployeeData, type SalaryData } from '../types';
+import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CustomerData, type CategoryData, type InventoryItem, type InventoryCategory, type InventoryCondition, type InventoryItemMeta, type SupplierData, type ExpenseItem, type EmployeeData, type SalaryData } from '../types';
 import { PencilIcon, TrashIcon, PlusCircleIcon, MagnifyingGlassIcon } from './Icons';
 import Pagination from './Pagination';
 
@@ -21,16 +21,20 @@ const ReusableModal: React.FC<{ title: string; onClose: () => void; children: Re
 );
 
 const EditInventoryModal: React.FC<{ 
-    item?: InventoryItem | null; 
-    onSave: (data: InventoryItem | Omit<InventoryItem, 'id'>) => void; 
+    item?: InventoryItem | null;
+    meta?: InventoryItemMeta;
+    onSave: (data: InventoryItem | Omit<InventoryItem, 'id'>, meta: Partial<InventoryItemMeta>) => void; 
     onClose: () => void;
-}> = ({ item, onSave, onClose }) => {
+}> = ({ item, meta, onSave, onClose }) => {
     const [formData, setFormData] = useState({
         name: item?.name || '',
         sku: item?.sku || '',
         stock: item?.stock?.toString() || '0',
         unit: item?.unit || 'pcs',
-        type: item?.type || 'Bahan Baku'
+        type: item?.type || 'Bahan Baku',
+        category: (meta?.category || 'Bahan Baku') as InventoryCategory,
+        condition: (meta?.condition || 'Baik') as InventoryCondition,
+        notes: meta?.notes || '',
     });
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -41,14 +45,22 @@ const EditInventoryModal: React.FC<{
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const dataToSave = {
-            ...formData,
+            name: formData.name,
+            sku: formData.sku,
             stock: Number(formData.stock),
+            unit: formData.unit,
             type: formData.type as 'Bahan Baku' | 'Barang Jadi',
+            ...(item?.usageHistory ? { usageHistory: item.usageHistory } : {}),
+        };
+        const metaToSave: Partial<InventoryItemMeta> = {
+            category: formData.category,
+            condition: formData.condition,
+            notes: formData.notes.trim() || undefined,
         };
         if (item?.id) {
-            onSave({ ...dataToSave, id: item.id });
+            onSave({ ...dataToSave, id: item.id }, metaToSave);
         } else {
-            onSave(dataToSave);
+            onSave(dataToSave, metaToSave);
         }
     };
 
@@ -56,18 +68,40 @@ const EditInventoryModal: React.FC<{
         <ReusableModal title={item ? "Edit Item Stok" : "Tambah Item Stok"} onClose={onClose}>
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div><label className="block text-sm font-medium">Nama Item</label><input name="name" value={formData.name} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" required /></div>
-                <div><label className="block text-sm font-medium">SKU</label><input name="sku" value={formData.sku} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" required /></div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium">Stok</label><input name="stock" type="number" value={formData.stock} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" required /></div>
+                    <div><label className="block text-sm font-medium">SKU</label><input name="sku" value={formData.sku} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" required /></div>
+                    <div>
+                        <label className="block text-sm font-medium">Kategori Tab</label>
+                        <select name="category" value={formData.category} onChange={handleChange} className="mt-1 w-full p-2 border bg-white rounded-md">
+                            <option value="Bahan Baku">Bahan Baku</option>
+                            <option value="ATK">ATK</option>
+                            <option value="Kebersihan">Kebersihan</option>
+                            <option value="Lain-Lain">Lain-Lain</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><label className="block text-sm font-medium">Stok</label><input name="stock" type="number" step="0.01" min="0" value={formData.stock} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" required /></div>
                   <div><label className="block text-sm font-medium">Satuan</label><input name="unit" value={formData.unit} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" required /></div>
                 </div>
-                <div>
-                    <label className="block text-sm font-medium">Tipe</label>
-                    <select name="type" value={formData.type} onChange={handleChange} className="mt-1 w-full p-2 border bg-white rounded-md">
-                        <option value="Bahan Baku">Bahan Baku</option>
-                        <option value="Barang Jadi">Barang Jadi</option>
-                    </select>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium">Tipe</label>
+                        <select name="type" value={formData.type} onChange={handleChange} className="mt-1 w-full p-2 border bg-white rounded-md">
+                            <option value="Bahan Baku">Bahan Baku</option>
+                            <option value="Barang Jadi">Barang Jadi</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium">Kondisi Barang</label>
+                        <select name="condition" value={formData.condition} onChange={handleChange} className="mt-1 w-full p-2 border bg-white rounded-md">
+                            <option value="Baik">Baik</option>
+                            <option value="Perlu Restock">Perlu Restock</option>
+                            <option value="Rusak / Perlu Ganti">Rusak / Perlu Ganti</option>
+                        </select>
+                    </div>
                 </div>
+                <div><label className="block text-sm font-medium">Catatan Kondisi (Opsional)</label><input name="notes" value={formData.notes} onChange={handleChange} className="mt-1 w-full p-2 border rounded-md" placeholder="Contoh: Gagang sapu mulai patah" /></div>
                 <div className="border-t pt-4 flex justify-end"><button type="submit" className="bg-pink-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-pink-700">Simpan</button></div>
             </form>
         </ReusableModal>
@@ -600,6 +634,7 @@ interface ManagementProps {
   customers: CustomerData[];
   categories: CategoryData[];
   inventory: InventoryItem[];
+  inventoryMetadata?: Record<number, InventoryItemMeta>;
   suppliers: SupplierData[];
   expenses: ExpenseItem[];
   employees: EmployeeData[];
@@ -624,8 +659,8 @@ interface ManagementProps {
   onAddSalary: (data: Omit<SalaryData, 'id'>) => void;
   onUpdateSalary: (data: SalaryData) => void;
   onDeleteSalary: (id: number) => void;
-  onAddInventoryItem: (newItem: Omit<InventoryItem, 'id'>) => void;
-  onUpdateInventoryItem: (updatedItem: InventoryItem) => void;
+  onAddInventoryItem: (newItem: Omit<InventoryItem, 'id'>, meta?: Partial<InventoryItemMeta>) => void;
+  onUpdateInventoryItem: (updatedItem: InventoryItem, meta?: Partial<InventoryItemMeta>) => void;
   onDeleteInventoryItem: (itemId: number) => void;
 }
 
@@ -644,7 +679,7 @@ const TABS = [
 
 const Management: React.FC<ManagementProps> = ({ 
     allOrders, products, finishings, customers, categories, 
-    inventory, suppliers, expenses, employees, salaries,
+    inventory, inventoryMetadata = {}, suppliers, expenses, employees, salaries,
     menuPermissions, onUpdateOrder, onDeleteOrder, onUpdateProduct, onDeleteProduct,
     onUpdateCategory, onDeleteCategory,
     onUpdateFinishing, onDeleteFinishing, onUpdateCustomer,
@@ -726,11 +761,11 @@ const Management: React.FC<ManagementProps> = ({
             }
         }
     };
-    const handleSaveInventory = (data: InventoryItem | Omit<InventoryItem, 'id'>) => {
+    const handleSaveInventory = (data: InventoryItem | Omit<InventoryItem, 'id'>, meta: Partial<InventoryItemMeta>) => {
         if ('id' in data) {
-            onUpdateInventoryItem(data);
+            onUpdateInventoryItem(data, meta);
         } else {
-            onAddInventoryItem(data as Omit<InventoryItem, 'id'>);
+            onAddInventoryItem(data as Omit<InventoryItem, 'id'>, meta);
         }
         setEditingInventory(null);
         setIsAddingInventory(false);
@@ -853,7 +888,7 @@ const Management: React.FC<ManagementProps> = ({
             case 'produk':
                 return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kategori" sortKey="category" /><NonSortableHeader label="Harga" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ProductData[]).map(p => (<tr key={p.id}><td className="py-4 px-4 text-sm font-medium">{p.name}</td><td className="py-4 px-4 text-sm">{p.category}</td><td className="py-4 px-4 text-xs">{`${p.price.endCustomer/1000}k / ${p.price.retail/1000}k / ${p.price.grosir/1000}k / ...`}</td><ActionButtons onEdit={() => setEditingProduct(p)} onDelete={() => handleDeleteItem('produk', p.id, p.name)} /></tr>))}</tbody></table>;
             case 'stok':
-                return <> <div className="flex justify-end mb-4"><button onClick={() => setIsAddingInventory(true)} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Stok</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="SKU" sortKey="sku" /><SortableHeader label="Stok" sortKey="stock" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as InventoryItem[]).map(i => (<tr key={i.id}><td className="py-4 px-4 text-sm font-medium">{i.name}</td><td className="py-4 px-4 text-sm">{i.sku}</td><td className="py-4 px-4 text-sm">{i.stock} {i.unit}</td><ActionButtons onEdit={() => setEditingInventory(i)} onDelete={() => handleDeleteItem('stok', i.id, i.name)} /></tr>))}</tbody></table></>;
+                return <> <div className="flex justify-end mb-4"><button onClick={() => setIsAddingInventory(true)} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Stok</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="SKU" sortKey="sku" /><NonSortableHeader label="Kategori" /><SortableHeader label="Stok" sortKey="stock" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as InventoryItem[]).map(i => (<tr key={i.id}><td className="py-4 px-4 text-sm font-medium">{i.name}</td><td className="py-4 px-4 text-sm">{i.sku}</td><td className="py-4 px-4 text-sm">{inventoryMetadata[i.id]?.category || 'Bahan Baku'}</td><td className="py-4 px-4 text-sm">{i.stock} {i.unit}</td><ActionButtons onEdit={() => setEditingInventory(i)} onDelete={() => handleDeleteItem('stok', i.id, i.name)} /></tr>))}</tbody></table></>;
             case 'kategori':
                 return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Tipe Satuan" sortKey="unitType" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as CategoryData[]).map(c => (<tr key={c.id}><td className="py-4 px-4 text-sm font-medium">{c.name}</td><td className="py-4 px-4 text-sm">{c.unitType}</td><ActionButtons onEdit={() => setEditingCategory(c)} onDelete={() => handleDeleteItem('kategori', c.id, c.name)} /></tr>))}</tbody></table>;
             case 'finishing':
@@ -929,6 +964,7 @@ const Management: React.FC<ManagementProps> = ({
              {(editingInventory || isAddingInventory) && (
                 <EditInventoryModal
                     item={editingInventory}
+                    meta={editingInventory ? inventoryMetadata[editingInventory.id] : undefined}
                     onSave={handleSaveInventory}
                     onClose={() => { setEditingInventory(null); setIsAddingInventory(false); }}
                 />

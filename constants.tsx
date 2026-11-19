@@ -3,7 +3,7 @@ import React from 'react';
 import { type MenuItem } from './types';
 import { 
   HomeIcon, ShoppingCartIcon, CreditCardIcon, ReceiptTaxIcon, CircleStackIcon, CubeIcon, 
-  WrenchScrewdriverIcon, ChartBarIcon, Cog6ToothIcon, TableCellsIcon, CalendarDaysIcon, Squares2X2Icon
+  WrenchScrewdriverIcon, ChartBarIcon, Cog6ToothIcon, TableCellsIcon, CalendarDaysIcon, Squares2X2Icon, TruckIcon, CurrencyDollarIcon
 } from './components/Icons';
 
 export const MENU_ITEMS: MenuItem[] = [
@@ -16,11 +16,22 @@ export const MENU_ITEMS: MenuItem[] = [
       { key: 'produksi', label: 'Dasbor Produksi' },
     ]
   },
+  { key: 'cashFlow', label: 'Arus Kas', icon: <CurrencyDollarIcon /> },
   { key: 'sales', label: 'Order', icon: <ShoppingCartIcon /> },
   { key: 'production', label: 'Produksi / Status Order', icon: <WrenchScrewdriverIcon /> },
   { key: 'printLayout', label: 'Layout Otomatis', icon: <Squares2X2Icon /> },
   { key: 'receivables', label: 'Pembayaran', icon: <CreditCardIcon /> },
-  { key: 'expenses', label: 'Pengeluaran', icon: <ReceiptTaxIcon /> },
+  { 
+    key: 'expenses', 
+    label: 'Pengeluaran', 
+    icon: <ReceiptTaxIcon />,
+    tabs: [
+      { key: 'operational', label: 'Pengeluaran Operasional' },
+      { key: 'installments', label: 'Cicilan Bank & Pemasok' },
+      { key: 'private', label: 'Pengeluaran Pribadi / Lain-lain' },
+    ]
+  },
+  { key: 'purchases', label: 'Pembelian / Barang Masuk', icon: <TruckIcon /> },
   { key: 'inventory', label: 'Stok / Inventori', icon: <CubeIcon /> },
   { 
     key: 'payroll', 

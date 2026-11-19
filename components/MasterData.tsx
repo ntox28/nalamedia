@@ -1,9 +1,9 @@
 
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { type ProductData, type CategoryData, type FinishingData, type CustomerData, type SupplierData, type EmployeeData } from '../types';
+import { type ProductData, type CategoryData, type FinishingData, type CustomerData, type SupplierData, type EmployeeData, type UserLevel } from '../types';
 import * as XLSX from 'xlsx';
-import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon } from './Icons';
+import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, PencilIcon, TrashIcon } from './Icons';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -25,12 +25,25 @@ interface MasterDataProps {
   suppliers: SupplierData[];
   employees: EmployeeData[];
   menuPermissions: string[];
+  userLevel?: UserLevel;
   onAddProduct: (newProduct: Omit<ProductData, 'id'>) => void;
+  onUpdateProduct: (updatedProduct: ProductData) => void;
+  onDeleteProduct: (id: number) => void;
   onAddCategory: (newCategory: Omit<CategoryData, 'id'>) => void;
+  onUpdateCategory: (updatedCategory: CategoryData) => void;
+  onDeleteCategory: (id: number) => void;
   onAddFinishing: (newFinishing: Omit<FinishingData, 'id'>) => void;
+  onUpdateFinishing: (updatedFinishing: FinishingData) => void;
+  onDeleteFinishing: (id: number) => void;
   onAddCustomer: (newCustomer: Omit<CustomerData, 'id' | 'joinDate'>) => void;
+  onUpdateCustomer: (updatedCustomer: CustomerData) => void;
+  onDeleteCustomer: (id: number) => void;
   onAddSupplier: (newSupplier: Omit<SupplierData, 'id'>) => void;
+  onUpdateSupplier: (updatedSupplier: SupplierData) => void;
+  onDeleteSupplier: (id: number) => void;
   onAddEmployee: (newEmployee: Omit<EmployeeData, 'id' | 'joinDate'>) => void;
+  onUpdateEmployee: (updatedEmployee: EmployeeData) => void;
+  onDeleteEmployee: (id: number) => void;
 }
 
 
@@ -52,44 +65,78 @@ const Modal: React.FC<{ show: boolean; onClose: () => void; title: string; child
 
 const ProductForm: React.FC<{
     categories: CategoryData[];
+    initialData?: ProductData | null;
     onSubmit: (data: any) => void;
-}> = ({ categories, onSubmit }) => {
-    
+}> = ({ categories, initialData, onSubmit }) => {
+    const [name, setName] = useState(initialData?.name || '');
+    const [category, setCategory] = useState(initialData?.category || categories[0]?.name || '');
+    const [prices, setPrices] = useState({
+        endCustomer: initialData ? String(initialData.price.endCustomer) : '',
+        retail: initialData ? String(initialData.price.retail) : '',
+        grosir: initialData ? String(initialData.price.grosir) : '',
+        reseller: initialData ? String(initialData.price.reseller) : '',
+        corporate: initialData ? String(initialData.price.corporate) : '',
+    });
+
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        const formData = new FormData(e.currentTarget);
-        const data: any = { price: {} };
-        formData.forEach((value, key) => {
-            if (key.includes('.')) {
-                const [parent, child] = key.split('.');
-                data[parent][child] = value;
-            } else {
-                data[key] = value;
-            }
+        onSubmit({
+            ...(initialData ? { id: initialData.id } : {}),
+            name,
+            category,
+            price: {
+                endCustomer: Number(prices.endCustomer) || 0,
+                retail: Number(prices.retail) || 0,
+                grosir: Number(prices.grosir) || 0,
+                reseller: Number(prices.reseller) || 0,
+                corporate: Number(prices.corporate) || 0,
+            },
         });
-        onSubmit(data);
     };
 
     const commonInputClass = "mt-1 w-full p-2 border border-gray-300 rounded-md";
 
     return (
         <form onSubmit={handleSubmit} className="space-y-3">
-            <input name="name" placeholder="Nama Produk/Layanan" className={commonInputClass} required />
-            <select name="category" defaultValue={categories[0]?.name || ''} className={commonInputClass} required>
-                <option value="" disabled>Pilih Kategori</option>
-                {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-            </select>
+            <div>
+                <label className="block text-xs font-medium text-gray-600">Nama Produk/Layanan</label>
+                <input value={name} onChange={e => setName(e.target.value)} placeholder="Nama Produk/Layanan" className={commonInputClass} required />
+            </div>
+            <div>
+                <label className="block text-xs font-medium text-gray-600">Kategori</label>
+                <select value={category} onChange={e => setCategory(e.target.value)} className={commonInputClass} required>
+                    <option value="" disabled>Pilih Kategori</option>
+                    {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+            </div>
             <div>
               <label className="text-sm font-medium">Harga</label>
               <div className="grid grid-cols-3 gap-2 mt-1">
-                <input name="price.endCustomer" type="number" placeholder="End Customer" className="w-full p-2 border border-gray-300 rounded-md" required />
-                <input name="price.retail" type="number" placeholder="Retail" className="w-full p-2 border border-gray-300 rounded-md" required />
-                <input name="price.grosir" type="number" placeholder="Grosir" className="w-full p-2 border border-gray-300 rounded-md" required />
-                <input name="price.reseller" type="number" placeholder="Reseller" className="w-full p-2 border border-gray-300 rounded-md" required />
-                <input name="price.corporate" type="number" placeholder="Corporate" className="w-full p-2 border border-gray-300 rounded-md" required />
+                <div>
+                    <span className="text-[11px] text-gray-500">End Customer</span>
+                    <input value={prices.endCustomer} onChange={e => setPrices(p => ({ ...p, endCustomer: e.target.value }))} type="number" placeholder="End Customer" className="w-full p-2 border border-gray-300 rounded-md" required />
+                </div>
+                <div>
+                    <span className="text-[11px] text-gray-500">Retail</span>
+                    <input value={prices.retail} onChange={e => setPrices(p => ({ ...p, retail: e.target.value }))} type="number" placeholder="Retail" className="w-full p-2 border border-gray-300 rounded-md" required />
+                </div>
+                <div>
+                    <span className="text-[11px] text-gray-500">Grosir</span>
+                    <input value={prices.grosir} onChange={e => setPrices(p => ({ ...p, grosir: e.target.value }))} type="number" placeholder="Grosir" className="w-full p-2 border border-gray-300 rounded-md" required />
+                </div>
+                <div>
+                    <span className="text-[11px] text-gray-500">Reseller</span>
+                    <input value={prices.reseller} onChange={e => setPrices(p => ({ ...p, reseller: e.target.value }))} type="number" placeholder="Reseller" className="w-full p-2 border border-gray-300 rounded-md" required />
+                </div>
+                <div>
+                    <span className="text-[11px] text-gray-500">Corporate</span>
+                    <input value={prices.corporate} onChange={e => setPrices(p => ({ ...p, corporate: e.target.value }))} type="number" placeholder="Corporate" className="w-full p-2 border border-gray-300 rounded-md" required />
+                </div>
               </div>
             </div>
-            <button type="submit" className="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 mt-4">Simpan</button>
+            <button type="submit" className="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 mt-4">
+                {initialData ? 'Simpan Perubahan' : 'Simpan'}
+            </button>
         </form>
     );
 }
@@ -321,15 +368,24 @@ const ImportExportModal: React.FC<{
 
 
 const MasterData: React.FC<MasterDataProps> = ({ 
-    products, categories, finishings, customers, suppliers, employees, menuPermissions,
-    onAddProduct, onAddCategory, onAddFinishing, onAddCustomer, onAddSupplier, onAddEmployee
+    products, categories, finishings, customers, suppliers, employees, menuPermissions, userLevel,
+    onAddProduct, onUpdateProduct, onDeleteProduct,
+    onAddCategory, onUpdateCategory, onDeleteCategory,
+    onAddFinishing, onUpdateFinishing, onDeleteFinishing,
+    onAddCustomer, onUpdateCustomer, onDeleteCustomer,
+    onAddSupplier, onUpdateSupplier, onDeleteSupplier,
+    onAddEmployee, onUpdateEmployee, onDeleteEmployee
 }) => {
   const accessibleTabs = useMemo(() => TABS.filter(tab => menuPermissions.includes(`masterData/${tab.key}`)), [menuPermissions]);
   const [activeTab, setActiveTab] = useState(accessibleTabs.length > 0 ? accessibleTabs[0].key : '');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<any | null>(null);
   const [isImportExportModalOpen, setIsImportExportModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+
+  const canEdit = userLevel === 'Admin' || userLevel === 'Office' || menuPermissions.some(p => p.startsWith('managementData/'));
+  const canDelete = userLevel === 'Admin' || menuPermissions.some(p => p.startsWith('managementData/'));
   
   useEffect(() => {
     if (accessibleTabs.length > 0 && !accessibleTabs.some(t => t.key === activeTab)) {
@@ -340,49 +396,108 @@ const MasterData: React.FC<MasterDataProps> = ({
   useEffect(() => {
       setSearchQuery('');
       setCurrentPage(1);
+      setEditingItem(null);
+      setIsModalOpen(false);
   }, [activeTab]);
   
   useEffect(() => {
       setCurrentPage(1);
   }, [searchQuery]);
 
-  const handleAddData = (data: any) => {
+  const handleOpenAddModal = () => {
+    setEditingItem(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (item: any) => {
+    setEditingItem(item);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingItem(null);
+  };
+
+  const handleSaveData = (data: any) => {
+    const isEditing = Boolean(editingItem && editingItem.id !== undefined);
     switch (activeTab) {
       case 'products':
-        onAddProduct({
-          name: data.name,
-          category: data.category,
-          price: {
-            endCustomer: Number(data.price.endCustomer),
-            retail: Number(data.price.retail),
-            grosir: Number(data.price.grosir),
-            reseller: Number(data.price.reseller),
-            corporate: Number(data.price.corporate),
-          }
-        });
+        if (isEditing) {
+          onUpdateProduct({ ...editingItem, ...data });
+        } else {
+          onAddProduct({
+            name: data.name,
+            category: data.category,
+            price: {
+              endCustomer: Number(data.price.endCustomer),
+              retail: Number(data.price.retail),
+              grosir: Number(data.price.grosir),
+              reseller: Number(data.price.reseller),
+              corporate: Number(data.price.corporate),
+            }
+          });
+        }
         break;
       case 'categories':
-        onAddCategory({ name: data.name, unitType: data.unitType });
+        if (isEditing) {
+          onUpdateCategory({ ...editingItem, name: data.name, unitType: data.unitType });
+        } else {
+          onAddCategory({ name: data.name, unitType: data.unitType });
+        }
         break;
       case 'finishings':
-        onAddFinishing({ name: data.name, price: Number(data.price), categoryIds: data.categoryIds });
+        if (isEditing) {
+          onUpdateFinishing({ ...editingItem, name: data.name, price: Number(data.price), categoryIds: data.categoryIds });
+        } else {
+          onAddFinishing({ name: data.name, price: Number(data.price), categoryIds: data.categoryIds });
+        }
         break;
       case 'customers':
-        onAddCustomer({ name: data.name, contact: data.contact, level: data.level });
+        if (isEditing) {
+          onUpdateCustomer({ ...editingItem, name: data.name, contact: data.contact, level: data.level });
+        } else {
+          onAddCustomer({ name: data.name, contact: data.contact, level: data.level });
+        }
         break;
       case 'suppliers':
-        onAddSupplier(data);
+        if (isEditing) {
+          onUpdateSupplier({ ...editingItem, name: data.name, contactPerson: data.contactPerson, phone: data.phone, specialty: data.specialty });
+        } else {
+          onAddSupplier(data);
+        }
         break;
       case 'karyawan':
-        onAddEmployee({ name: data.name, contact: data.contact, division: data.division });
+        if (isEditing) {
+          onUpdateEmployee({ ...editingItem, name: data.name, contact: data.contact, division: data.division });
+        } else {
+          onAddEmployee({ name: data.name, contact: data.contact, division: data.division });
+        }
         break;
     }
-    setIsModalOpen(false);
+    handleCloseModal();
+  };
+
+  const handleDeleteRow = (id: number, label: string) => {
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus "${label}"?`)) return;
+    switch (activeTab) {
+      case 'products': onDeleteProduct(id); break;
+      case 'categories': onDeleteCategory(id); break;
+      case 'finishings': onDeleteFinishing(id); break;
+      case 'customers': onDeleteCustomer(id); break;
+      case 'suppliers': onDeleteSupplier(id); break;
+      case 'karyawan': onDeleteEmployee(id); break;
+    }
   };
   
   const renderModalContent = () => {
-    const commonSubmitButton = <button type="submit" className="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 mt-4">Simpan</button>;
+    const commonSubmitButton = (
+      <button type="submit" className="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 mt-4">
+        {editingItem ? 'Simpan Perubahan' : 'Simpan'}
+      </button>
+    );
     const commonInputClass = "mt-1 w-full p-2 border border-gray-300 rounded-md";
+    const modalFormKey = `${activeTab}-${editingItem?.id ?? 'new'}`;
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -405,67 +520,129 @@ const MasterData: React.FC<MasterDataProps> = ({
                 data[key] = value;
             }
         });
-        handleAddData(data);
+        handleSaveData(data);
     };
 
     switch (activeTab) {
         case 'products':
-            return <ProductForm categories={categories} onSubmit={handleAddData} />;
+            return <ProductForm key={modalFormKey} categories={categories} initialData={editingItem} onSubmit={handleSaveData} />;
         case 'categories':
             return (
-                <form onSubmit={handleSubmit} className="space-y-3">
-                    <input name="name" placeholder="Nama Kategori Baru" className={commonInputClass} required />
-                    <select name="unitType" className={`${commonInputClass} bg-white`} required>
-                      <option value="Per Buah">Per Buah (Contoh: pcs, box, rim)</option>
-                      <option value="Per Luas">Per Luas (Contoh: m²)</option>
-                    </select>
+                <form key={modalFormKey} onSubmit={handleSubmit} className="space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Nama Kategori</label>
+                        <input name="name" defaultValue={editingItem?.name || ''} placeholder="Nama Kategori Baru" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Tipe Satuan</label>
+                        <select name="unitType" defaultValue={editingItem?.unitType || 'Per Buah'} className={`${commonInputClass} bg-white`} required>
+                          <option value="Per Buah">Per Buah (Contoh: pcs, box, rim)</option>
+                          <option value="Per Luas">Per Luas (Contoh: m²)</option>
+                        </select>
+                    </div>
                     {commonSubmitButton}
                 </form>
             );
          case 'finishings':
             return (
-                <form onSubmit={handleSubmit} className="space-y-3">
-                    <input name="name" placeholder="Nama Finishing" className={commonInputClass} required />
-                    <input name="price" type="number" placeholder="Harga" className={commonInputClass} required min="0" />
+                <form key={modalFormKey} onSubmit={handleSubmit} className="space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Nama Finishing</label>
+                        <input name="name" defaultValue={editingItem?.name || ''} placeholder="Nama Finishing" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Harga</label>
+                        <input name="price" type="number" defaultValue={editingItem?.price ?? ''} placeholder="Harga" className={commonInputClass} required min="0" />
+                    </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Kategori Terkait (opsional)</label>
-                        <p className="text-xs text-gray-500 mb-1">Pilih kategori spesifik. Kosongkan untuk umum.</p>
-                        <select name="categoryIds" multiple className={`${commonInputClass} h-32`}>
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                         <p className="text-xs text-gray-500 mt-1">Tahan Ctrl (atau Cmd di Mac) untuk memilih lebih dari satu.</p>
+                        <p className="text-xs text-gray-500 mb-1">Centang kategori spesifik. Kosongkan untuk semua kategori.</p>
+                        <div className="border rounded-md p-2 max-h-36 overflow-y-auto space-y-1 bg-gray-50">
+                            {categories.map(c => (
+                                <label key={c.id} className="flex items-center space-x-2 text-sm text-gray-700 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        name="categoryIds"
+                                        value={c.id}
+                                        defaultChecked={Array.isArray(editingItem?.categoryIds) && editingItem.categoryIds.includes(c.id)}
+                                        className="h-4 w-4 text-pink-600 rounded"
+                                    />
+                                    <span>{c.name}</span>
+                                </label>
+                            ))}
+                        </div>
                     </div>
                     {commonSubmitButton}
                 </form>
             );
         case 'customers': 
             return (
-                <form onSubmit={handleSubmit} className="space-y-3">
-                    <input name="name" placeholder="Nama Pelanggan" className={commonInputClass} required />
-                    <input name="contact" placeholder="Kontak" className={commonInputClass} required />
-                    <select name="level" className={commonInputClass} required>
-                        <option value="End Customer">End Customer</option>
-                        <option value="Retail">Retail</option>
-                        <option value="Grosir">Grosir</option>
-                        <option value="Reseller">Reseller</option>
-                        <option value="Corporate">Corporate</option>
-                    </select>
+                <form key={modalFormKey} onSubmit={handleSubmit} className="space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Nama Pelanggan</label>
+                        <input name="name" defaultValue={editingItem?.name || ''} placeholder="Nama Pelanggan" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Kontak</label>
+                        <input name="contact" defaultValue={editingItem?.contact || ''} placeholder="Kontak" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Level Harga</label>
+                        <select name="level" defaultValue={editingItem?.level || 'End Customer'} className={commonInputClass} required>
+                            <option value="End Customer">End Customer</option>
+                            <option value="Retail">Retail</option>
+                            <option value="Grosir">Grosir</option>
+                            <option value="Reseller">Reseller</option>
+                            <option value="Corporate">Corporate</option>
+                        </select>
+                    </div>
                     {commonSubmitButton}
                 </form> 
             );
-        case 'suppliers': return ( <form onSubmit={handleSubmit} className="space-y-3"><input name="name" placeholder="Nama Supplier" className={commonInputClass} required /><input name="contactPerson" placeholder="Narahubung" className={commonInputClass} required /><input name="phone" placeholder="Telepon" className={commonInputClass} required /><input name="specialty" placeholder="Spesialisasi" className={commonInputClass} required />{commonSubmitButton}</form> );
-        case 'karyawan': return (
-            <form onSubmit={handleSubmit} className="space-y-3">
-                <input name="name" placeholder="Nama Karyawan" className={commonInputClass} required />
-                <input name="contact" placeholder="Kontak" className={commonInputClass} required />
-                <select name="division" className={commonInputClass} required>
-                    <option value="Kasir">Kasir</option>
-                    <option value="Office">Office</option>
-                    <option value="Produksi">Produksi</option>
-                </select>
-                {commonSubmitButton}
-            </form> 
-        );
+        case 'suppliers':
+            return (
+                <form key={modalFormKey} onSubmit={handleSubmit} className="space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Nama Supplier</label>
+                        <input name="name" defaultValue={editingItem?.name || ''} placeholder="Nama Supplier" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Narahubung</label>
+                        <input name="contactPerson" defaultValue={editingItem?.contactPerson || ''} placeholder="Narahubung" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Telepon</label>
+                        <input name="phone" defaultValue={editingItem?.phone || ''} placeholder="Telepon" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Spesialisasi</label>
+                        <input name="specialty" defaultValue={editingItem?.specialty || ''} placeholder="Spesialisasi" className={commonInputClass} required />
+                    </div>
+                    {commonSubmitButton}
+                </form>
+            );
+        case 'karyawan':
+            return (
+                <form key={modalFormKey} onSubmit={handleSubmit} className="space-y-3">
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Nama Karyawan</label>
+                        <input name="name" defaultValue={editingItem?.name || ''} placeholder="Nama Karyawan" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Kontak</label>
+                        <input name="contact" defaultValue={editingItem?.contact || ''} placeholder="Kontak" className={commonInputClass} required />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-gray-600">Divisi</label>
+                        <select name="division" defaultValue={editingItem?.division || 'Kasir'} className={commonInputClass} required>
+                            <option value="Kasir">Kasir</option>
+                            <option value="Office">Office</option>
+                            <option value="Produksi">Produksi</option>
+                        </select>
+                    </div>
+                    {commonSubmitButton}
+                </form> 
+            );
         default: return null;
     }
   };
@@ -505,39 +682,70 @@ const MasterData: React.FC<MasterDataProps> = ({
     };
   }, [activeTab, searchQuery, currentPage, products, categories, finishings, customers, suppliers, employees]);
   
+  const renderActionButtons = (item: any, label: string) => {
+    if (!canEdit && !canDelete) return null;
+    return (
+      <td className="py-4 px-4 whitespace-nowrap text-sm text-right">
+        <div className="inline-flex items-center space-x-1.5">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => handleOpenEditModal(item)}
+              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+              title={`Edit ${label}`}
+            >
+              <PencilIcon className="h-4 w-4" />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => handleDeleteRow(item.id, label)}
+              className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+              title={`Hapus ${label}`}
+            >
+              <TrashIcon className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </td>
+    );
+  };
+
   const renderContent = () => {
-    // Reusable Table component
+    const showActions = canEdit || canDelete;
     const Table: React.FC<{headers: string[], children: React.ReactNode}> = ({headers, children}) => (
-        <div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-100"><tr>{headers.map(h => (<th key={h} className="py-3 px-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>))}</tr></thead><tbody className="divide-y divide-gray-200">{children}</tbody></table></div>
+        <div className="overflow-x-auto"><table className="min-w-full bg-white"><thead className="bg-gray-100"><tr>{headers.map(h => (<th key={h} className={`py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider ${h === 'Aksi' ? 'text-right' : 'text-left'}`}>{h}</th>))}</tr></thead><tbody className="divide-y divide-gray-200">{children}</tbody></table></div>
     );
     const Td: React.FC<{children:React.ReactNode, className?: string}> = ({children, className}) => (<td className={`py-4 px-4 whitespace-nowrap text-sm ${className}`}>{children}</td>);
 
     switch (activeTab) {
       case 'products':
         return (
-            <Table headers={["Nama Layanan/Produk", "Kategori", "Harga (EC/R/G/S/C)"]}>
-            {(paginatedData as ProductData[]).map((product) => (<tr key={product.id}><Td className="font-medium text-gray-900">{product.name}</Td><Td className="text-gray-500">{product.category}</Td><Td className="text-gray-500 text-xs">{`${product.price.endCustomer/1000}k / ${product.price.retail/1000}k / ${product.price.grosir/1000}k / ${product.price.reseller/1000}k / ${product.price.corporate/1000}k`}</Td></tr>))}
+            <Table headers={[...( ["Nama Layanan/Produk", "Kategori", "Harga (EC/R/G/S/C)"] ), ...(showActions ? ["Aksi"] : [])]}>
+            {(paginatedData as ProductData[]).map((product) => (<tr key={product.id} className="hover:bg-gray-50"><Td className="font-medium text-gray-900">{product.name}</Td><Td className="text-gray-500">{product.category}</Td><Td className="text-gray-500 text-xs">{`${product.price.endCustomer/1000}k / ${product.price.retail/1000}k / ${product.price.grosir/1000}k / ${product.price.reseller/1000}k / ${product.price.corporate/1000}k`}</Td>{renderActionButtons(product, product.name)}</tr>))}
             </Table>
         );
       case 'categories':
         return (
-          <Table headers={["Nama Kategori", "Tipe Satuan"]}>
-              {(paginatedData as CategoryData[]).map((cat) => (<tr key={cat.id}><Td className="font-medium text-gray-900">{cat.name}</Td><Td className="text-gray-500">{cat.unitType}</Td></tr>))}
+          <Table headers={[...( ["Nama Kategori", "Tipe Satuan"] ), ...(showActions ? ["Aksi"] : [])]}>
+              {(paginatedData as CategoryData[]).map((cat) => (<tr key={cat.id} className="hover:bg-gray-50"><Td className="font-medium text-gray-900">{cat.name}</Td><Td className="text-gray-500">{cat.unitType}</Td>{renderActionButtons(cat, cat.name)}</tr>))}
           </Table>
       );
       case 'finishings':
         return (
-            <Table headers={["Nama Finishing", "Harga", "Kategori Terkait"]}>
+            <Table headers={[...( ["Nama Finishing", "Harga", "Kategori Terkait"] ), ...(showActions ? ["Aksi"] : [])]}>
                 {(paginatedData as FinishingData[]).map((f) => {
                     const relatedCategories = f.categoryIds && f.categoryIds.length > 0
                         ? f.categoryIds.map(id => categories.find(c => c.id === id)?.name).filter(Boolean).join(', ')
                         : <span className="text-gray-400 italic">Semua Kategori</span>;
 
                     return (
-                        <tr key={f.id}>
+                        <tr key={f.id} className="hover:bg-gray-50">
                             <Td className="font-medium text-gray-900">{f.name}</Td>
                             <Td className="text-gray-500">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(f.price)}</Td>
                             <Td className="text-gray-500 text-xs">{relatedCategories}</Td>
+                            {renderActionButtons(f, f.name)}
                         </tr>
                     );
                 })}
@@ -545,30 +753,31 @@ const MasterData: React.FC<MasterDataProps> = ({
       );
       case 'customers':
         return (
-            <Table headers={["Nama Pelanggan", "Kontak", "Level Harga", "Tanggal Bergabung"]}>
-                {(paginatedData as CustomerData[]).map((c) => (<tr key={c.id}><Td className="font-medium text-gray-900">{c.name}</Td><Td className="text-gray-500">{c.contact}</Td><Td className="text-gray-500"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+            <Table headers={[...( ["Nama Pelanggan", "Kontak", "Level Harga", "Tanggal Bergabung"] ), ...(showActions ? ["Aksi"] : [])]}>
+                {(paginatedData as CustomerData[]).map((c) => (<tr key={c.id} className="hover:bg-gray-50"><Td className="font-medium text-gray-900">{c.name}</Td><Td className="text-gray-500">{c.contact}</Td><Td className="text-gray-500"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                     c.level === 'Corporate' ? 'bg-cyan-100 text-cyan-800' :
                     c.level === 'Reseller' ? 'bg-teal-100 text-teal-800' :
                     c.level === 'Grosir' ? 'bg-yellow-100 text-yellow-800' :
                     c.level === 'Retail' ? 'bg-fuchsia-100 text-fuchsia-800' :
                     'bg-pink-100 text-pink-800'
-                }`}>{c.level}</span></Td><Td className="text-gray-500">{new Date(c.joinDate).toLocaleDateString('id-ID')}</Td></tr>))}
+                }`}>{c.level}</span></Td><Td className="text-gray-500">{new Date(c.joinDate).toLocaleDateString('id-ID')}</Td>{renderActionButtons(c, c.name)}</tr>))}
             </Table>
       );
       case 'suppliers':
         return (
-            <Table headers={["Nama Supplier", "Narahubung", "Telepon", "Spesialisasi"]}>
-              {(paginatedData as SupplierData[]).map((s) => (<tr key={s.id}><Td className="font-medium text-gray-900">{s.name}</Td><Td className="text-gray-500">{s.contactPerson}</Td><Td className="text-gray-500">{s.phone}</Td><Td className="text-gray-500">{s.specialty}</Td></tr>))}
+            <Table headers={[...( ["Nama Supplier", "Narahubung", "Telepon", "Spesialisasi"] ), ...(showActions ? ["Aksi"] : [])]}>
+              {(paginatedData as SupplierData[]).map((s) => (<tr key={s.id} className="hover:bg-gray-50"><Td className="font-medium text-gray-900">{s.name}</Td><Td className="text-gray-500">{s.contactPerson}</Td><Td className="text-gray-500">{s.phone}</Td><Td className="text-gray-500">{s.specialty}</Td>{renderActionButtons(s, s.name)}</tr>))}
             </Table>
         );
       case 'karyawan':
         return (
-            <Table headers={["Nama Karyawan", "Kontak", "Devisi", "Tanggal Bergabung"]}>
-                {(paginatedData as EmployeeData[]).map((e) => (<tr key={e.id}>
+            <Table headers={[...( ["Nama Karyawan", "Kontak", "Devisi", "Tanggal Bergabung"] ), ...(showActions ? ["Aksi"] : [])]}>
+                {(paginatedData as EmployeeData[]).map((e) => (<tr key={e.id} className="hover:bg-gray-50">
                     <Td className="font-medium text-gray-900">{e.name}</Td>
                     <Td className="text-gray-500">{e.contact}</Td>
                     <Td className="text-gray-500">{e.division}</Td>
                     <Td className="text-gray-500">{new Date(e.joinDate).toLocaleDateString('id-ID')}</Td>
+                    {renderActionButtons(e, e.name)}
                 </tr>))}
             </Table>
         );
@@ -580,14 +789,16 @@ const MasterData: React.FC<MasterDataProps> = ({
   );
   
   const getModalTitle = () => {
+      const prefix = editingItem ? 'Edit' : 'Tambah';
+      const suffix = editingItem ? '' : ' Baru';
       switch (activeTab) {
-          case 'products': return 'Tambah Produk Baru';
-          case 'categories': return 'Tambah Kategori Baru';
-          case 'finishings': return 'Tambah Finishing Baru';
-          case 'customers': return 'Tambah Pelanggan Baru';
-          case 'suppliers': return 'Tambah Supplier Baru';
-          case 'karyawan': return 'Tambah Karyawan Baru';
-          default: return 'Tambah Baru';
+          case 'products': return `${prefix} Produk${suffix}`;
+          case 'categories': return `${prefix} Kategori${suffix}`;
+          case 'finishings': return `${prefix} Finishing${suffix}`;
+          case 'customers': return `${prefix} Pelanggan${suffix}`;
+          case 'suppliers': return `${prefix} Supplier${suffix}`;
+          case 'karyawan': return `${prefix} Karyawan${suffix}`;
+          default: return `${prefix} Data`;
       }
   }
 
@@ -607,7 +818,7 @@ const MasterData: React.FC<MasterDataProps> = ({
         <h2 className="text-xl font-bold">Manajemen Data Master</h2>
         <div className="flex space-x-2">
             <button onClick={() => setIsImportExportModalOpen(true)} className="bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-700 transition-colors">Impor dan Ekspor Data</button>
-            <button onClick={() => setIsModalOpen(true)} className="bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700 transition-colors">+ Tambah Baru</button>
+            <button onClick={handleOpenAddModal} className="bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700 transition-colors">+ Tambah Baru</button>
         </div>
       </div>
       
@@ -639,7 +850,7 @@ const MasterData: React.FC<MasterDataProps> = ({
         onPageChange={setCurrentPage}
       />
 
-      <Modal show={isModalOpen} onClose={() => setIsModalOpen(false)} title={getModalTitle()}>
+      <Modal show={isModalOpen} onClose={handleCloseModal} title={getModalTitle()}>
         {renderModalContent()}
       </Modal>
 

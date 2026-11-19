@@ -2,9 +2,11 @@ import type React from 'react';
 
 export type MenuKey =
   | 'dashboard'
+  | 'cashFlow'
   | 'sales'
   | 'receivables'
   | 'expenses'
+  | 'purchases'
   | 'payroll'
   | 'masterData'
   | 'managementData'
@@ -182,6 +184,28 @@ export interface InventoryItem {
   usageHistory?: StockUsageRecord[];
 }
 
+export type InventoryCategory = 'Bahan Baku' | 'ATK' | 'Kebersihan' | 'Lain-Lain';
+export type InventoryCondition = 'Baik' | 'Perlu Restock' | 'Rusak / Perlu Ganti';
+
+export interface InventoryItemMeta {
+  category: InventoryCategory;
+  condition?: InventoryCondition;
+  notes?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface InventoryTabCheckInfo {
+  checkedAt: string;
+  checkedBy: string;
+}
+
+export interface InventoryCheckStatus {
+  lastCheckedAt?: string;
+  lastCheckedBy?: string;
+  byCategory?: Partial<Record<InventoryCategory, InventoryTabCheckInfo>>;
+}
+
 // --- Payroll Types ---
 export interface AttendanceData {
   id: number;
@@ -311,13 +335,215 @@ export interface NotificationItem {
   onNavigate?: () => void;
 }
 
+// --- Tahap 2: Pembelian / Barang Masuk, Cicilan & Pemisahan Pengeluaran ---
+export type ExpenseFundingSource = 'Kas Laci' | 'Transfer Bank';
+export type InstallmentFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Dana Owner' | 'Sistem Lama (Sudah Tercatat)';
+export type PrivateFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Uang Pribadi Owner';
+
+export interface ExpenseMetadata {
+  fundingSource: ExpenseFundingSource;
+  fundingAccountId?: string;
+  fundingAccountName?: string;
+  purchaseId?: string;
+  notes?: string;
+  createdBy?: string;
+}
+
+export interface PurchaseItem {
+  inventoryId: number;
+  itemName: string;
+  sku: string;
+  unit: string;
+  qty: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface PurchaseRecord {
+  id: string;
+  invoiceNumber: string;
+  date: string;
+  supplierId: number;
+  supplierName: string;
+  items: PurchaseItem[];
+  totalAmount: number;
+  paymentType: 'Lunas' | 'Kredit';
+  fundingSource?: ExpenseFundingSource;
+  fundingAccountId?: string;
+  fundingAccountName?: string;
+  dpAmount?: number;
+  dueDate?: string;
+  expenseId?: number;
+  supplierBillId?: string;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface BillPayment {
+  id: string;
+  date: string;
+  amount: number;
+  fundingSource: InstallmentFundingSource;
+  fundingAccountId?: string;
+  fundingAccountName?: string;
+  notes?: string;
+  paidBy?: string;
+}
+
+export interface SupplierBill {
+  id: string;
+  purchaseId?: string;
+  invoiceNumber: string;
+  supplierId: number;
+  supplierName: string;
+  description: string;
+  date: string;
+  dueDate: string;
+  totalAmount: number;
+  payments: BillPayment[];
+  status: 'Belum Lunas' | 'Lunas';
+  notes?: string;
+}
+
+export interface BankInstallmentPayment {
+  id: string;
+  date: string;
+  totalPaid: number;
+  principalPaid: number;
+  interestPaid: number;
+  fundingSource: InstallmentFundingSource;
+  fundingAccountId?: string;
+  fundingAccountName?: string;
+  notes?: string;
+  paidBy?: string;
+}
+
+export interface BankInstallment {
+  id: string;
+  debtId?: number;
+  name: string;
+  creditLimit: number;
+  remainingPrincipal: number;
+  dueDayOfMonth?: number;
+  nextDueDate?: string;
+  notes?: string;
+  payments: BankInstallmentPayment[];
+  status: 'Aktif' | 'Lunas';
+}
+
+export interface PrivateExpenseItem {
+  id: string;
+  name: string;
+  category: string;
+  amount: number;
+  date: string;
+  fundingSource: PrivateFundingSource;
+  fundingAccountId?: string;
+  fundingAccountName?: string;
+  guestOrEvent?: string;
+  needsReimburse?: boolean;
+  reimbursed?: boolean;
+  notes?: string;
+  createdBy?: string;
+}
+
+// --- Tahap 1: Kas Laci Akumulatif, Tombol Setor & Log History ---
+export interface CashDrawerState {
+  periodStartDate: string;
+  periodStartAt: string;
+  openingCash: number;
+  settledCashInOnStartDate: number;
+  settledCashOutOnStartDate: number;
+  settledCashTransferInOnStartDate?: number;
+  settledCashTransferOutOnStartDate?: number;
+}
+
+export interface CashDrawerLog {
+  id: string;
+  type: 'Setor' | 'Penyesuaian Kas Awal';
+  timestamp: string;
+  periodStartDate: string;
+  periodEndDate: string;
+  openingCash: number;
+  cashInTotal: number;
+  cashOutTotal: number;
+  nonCashTotal: number;
+  expectedCash: number;
+  physicalCash?: number;
+  discrepancy?: number;
+  depositAmount: number;
+  remainingCash: number;
+  recipient?: string;
+  depositToAccountId?: string;
+  depositToAccountName?: string;
+  operator?: string;
+  notes?: string;
+  breakdownByMethod?: Record<string, number>;
+}
+
+// --- Mutasi Antar Akun & Rekonsiliasi Saldo Sistem vs Real ---
+export type CashTransferType = 'Pindah Akun' | 'Suntik Modal' | 'Tarik Owner';
+
+export interface CashTransferRecord {
+  id: string;
+  date: string;
+  timestamp: string;
+  transferType: CashTransferType;
+  fromAccountId?: string;
+  fromAccountName?: string;
+  toAccountId?: string;
+  toAccountName?: string;
+  amount: number;
+  adminFee?: number;
+  netAmount: number;
+  notes?: string;
+  createdBy?: string;
+}
+
+export interface AccountBalanceMeta {
+  openingBalance: number;
+  openingDate: string;
+  settledNetOnOpeningDate?: number;
+  lastRealBalance?: number;
+  lastRealCheckedAt?: string;
+  lastRealCheckedBy?: string;
+  notes?: string;
+}
+
 // --- Component Props ---
+export interface CashFlowProps {
+  receivables: ReceivableItem[];
+  expenses: ExpenseItem[];
+  expenseMetadata: Record<number, ExpenseMetadata>;
+  supplierBills: SupplierBill[];
+  bankInstallments: BankInstallment[];
+  privateExpenses: PrivateExpenseItem[];
+  paymentMethods: PaymentMethod[];
+  cashDrawerState: CashDrawerState;
+  cashDrawerLogs: CashDrawerLog[];
+  cashTransfers: CashTransferRecord[];
+  accountBalancesMeta: Record<string, AccountBalanceMeta>;
+  legacyMonthlyIncomes: LegacyMonthlyIncome[];
+  legacyMonthlyExpenses: LegacyMonthlyExpense[];
+  onAddCashTransfer: (payload: Omit<CashTransferRecord, 'id' | 'timestamp' | 'createdBy'>) => Promise<void>;
+  onDeleteCashTransfer: (id: string) => Promise<void>;
+  onSaveAccountBalanceMeta: (methodId: string, meta: AccountBalanceMeta) => Promise<void>;
+}
+
 export interface ReportsProps {
   allOrders: SavedOrder[];
   expenses: ExpenseItem[];
+  supplierBills: SupplierBill[];
+  bankInstallments: BankInstallment[];
+  privateExpenses: PrivateExpenseItem[];
+  cashDrawerLogs: CashDrawerLog[];
+  cashTransfers: CashTransferRecord[];
   receivables: ReceivableItem[];
   products: ProductData[];
   customers: CustomerData[];
+  suppliers: SupplierData[];
+  paymentMethods: PaymentMethod[];
   inventory: InventoryItem[];
   categories: CategoryData[];
   finishings: FinishingData[];

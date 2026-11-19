@@ -1,22 +1,14 @@
 
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type InventoryItem, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData } from '../types';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { type SavedOrder, type ExpenseItem, type ReceivableItem, type ProductData, type CustomerData, type SupplierData, type PaymentMethod, type InventoryItem, type LegacyMonthlyIncome, type LegacyMonthlyExpense, type LegacyReceivable, type AssetItem, type DebtItem, type CategoryData, type FinishingData, type ReportsProps, type OrderItemData, type SupplierBill, type BankInstallment, type PrivateExpenseItem } from '../types';
 import { CurrencyDollarIcon, ReceiptTaxIcon, ChartBarIcon, ShoppingCartIcon, UsersIcon, CubeIcon, ChevronDownIcon, PencilIcon, TrashIcon, ExclamationTriangleIcon, CreditCardIcon, ArrowDownTrayIcon, PrinterIcon, FilterIcon, ArrowUpTrayIcon } from './Icons';
 import { exportToExcel } from './reportUtils';
+import { calculateGlobalFinancialRecap, getUtcDateStr as getLocalDateStr, getUtcMonthDateRange as getMonthDateRange } from './cashFlowUtils';
 import * as XLSX from 'xlsx';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
-
-
-// Helper to get first and last day of the current month
-const getMonthDateRange = () => {
-  const date = new Date();
-  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1).toISOString().substring(0, 10);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).toISOString().substring(0, 10);
-  return { firstDay, lastDay };
-};
 
 const formatCurrency = (value: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(value);
 const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -271,23 +263,55 @@ const LegacyReceivableForm: React.FC<{
     )
 };
 
+const COMMON_BANK_PRESETS = [
+    'Bank BRI',
+    'Bank BCA',
+    'Bank Mandiri',
+    'Bank BNI',
+    'Bank BTN',
+    'Bank Jateng',
+    'BSI (Bank Syariah Indonesia)',
+    'Leasing / Kredit Mesin',
+];
+
 const AssetsAndDebts: React.FC<{
     assets: AssetItem[];
     debts: DebtItem[];
+    bankInstallments: BankInstallment[];
+    supplierBills: SupplierBill[];
+    suppliers: SupplierData[];
+    paymentMethods: PaymentMethod[];
     onAddAsset: (data: Omit<AssetItem, 'id'>) => void;
     onUpdateAsset: (data: AssetItem) => void;
     onDeleteAsset: (id: number) => void;
     onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
     onUpdateDebt: (data: DebtItem) => void;
     onDeleteDebt: (id: number) => void;
-}> = ({ assets, debts, onAddAsset, onUpdateAsset, onDeleteAsset, onAddDebt, onUpdateDebt, onDeleteDebt }) => {
+}> = ({
+    assets,
+    debts,
+    bankInstallments,
+    supplierBills,
+    suppliers,
+    paymentMethods,
+    onAddAsset,
+    onUpdateAsset,
+    onDeleteAsset,
+    onAddDebt,
+    onUpdateDebt,
+    onDeleteDebt,
+}) => {
     const [editingAsset, setEditingAsset] = useState<AssetItem | null>(null);
     const [assetName, setAssetName] = useState('');
     const [assetValue, setAssetValue] = useState('');
 
     const [editingDebt, setEditingDebt] = useState<DebtItem | null>(null);
+    const [debtCategoryMode, setDebtCategoryMode] = useState<'Bank / Leasing' | 'Saldo Awal Pemasok' | 'Lainnya'>('Bank / Leasing');
     const [debtName, setDebtName] = useState('');
     const [debtValue, setDebtValue] = useState('');
+    const [isCreditorDropdownOpen, setIsCreditorDropdownOpen] = useState(false);
+    const [expandedSupplierKey, setExpandedSupplierKey] = useState<string | null>(null);
+    const creditorDropdownRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (editingAsset) {
@@ -303,11 +327,168 @@ const AssetsAndDebts: React.FC<{
         if (editingDebt) {
             setDebtName(editingDebt.name);
             setDebtValue(editingDebt.value.toString());
+            const lower = editingDebt.name.toLowerCase();
+            if (suppliers.some(s => s.name.toLowerCase() === lower)) {
+                setDebtCategoryMode('Saldo Awal Pemasok');
+            } else if (lower.includes('bank') || lower.includes('kur') || lower.includes('kredit') || lower.includes('leasing') || lower.includes('bri') || lower.includes('bca') || lower.includes('mandiri') || lower.includes('bni')) {
+                setDebtCategoryMode('Bank / Leasing');
+            } else {
+                setDebtCategoryMode('Lainnya');
+            }
         } else {
             setDebtName('');
             setDebtValue('');
         }
-    }, [editingDebt]);
+        setIsCreditorDropdownOpen(false);
+    }, [editingDebt, suppliers]);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (creditorDropdownRef.current && !creditorDropdownRef.current.contains(event.target as Node)) {
+                setIsCreditorDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Group unpaid supplierBills per supplier (Otomatis dari Pembelian Kredit & Tagihan Pemasok)
+    const supplierDebtGroups = useMemo(() => {
+        const map = new Map<string, {
+            key: string;
+            supplierName: string;
+            totalBillAmount: number;
+            totalPaidAmount: number;
+            remainingAmount: number;
+            nearestDueDate: string;
+            bills: Array<{
+                id: string;
+                invoiceNumber: string;
+                date: string;
+                dueDate: string;
+                description: string;
+                totalAmount: number;
+                paidAmount: number;
+                remaining: number;
+            }>;
+        }>();
+
+        supplierBills.forEach(bill => {
+            if (bill.status !== 'Belum Lunas') return;
+            const paidAmount = bill.payments.reduce((ps, p) => ps + Number(p.amount || 0), 0);
+            const remaining = Math.max(0, Number(bill.totalAmount || 0) - paidAmount);
+            if (remaining <= 0) return;
+
+            const key = bill.supplierName.trim().toLowerCase();
+            if (!map.has(key)) {
+                map.set(key, {
+                    key,
+                    supplierName: bill.supplierName.trim(),
+                    totalBillAmount: 0,
+                    totalPaidAmount: 0,
+                    remainingAmount: 0,
+                    nearestDueDate: bill.dueDate || '',
+                    bills: [],
+                });
+            }
+            const group = map.get(key)!;
+            group.totalBillAmount += Number(bill.totalAmount || 0);
+            group.totalPaidAmount += paidAmount;
+            group.remainingAmount += remaining;
+            if (bill.dueDate && (!group.nearestDueDate || bill.dueDate < group.nearestDueDate)) {
+                group.nearestDueDate = bill.dueDate;
+            }
+            group.bills.push({
+                id: bill.id,
+                invoiceNumber: bill.invoiceNumber,
+                date: bill.date,
+                dueDate: bill.dueDate,
+                description: bill.description,
+                totalAmount: Number(bill.totalAmount || 0),
+                paidAmount,
+                remaining,
+            });
+        });
+
+        return Array.from(map.values()).sort((a, b) => b.remainingAmount - a.remainingAmount);
+    }, [supplierBills]);
+
+    const supplierActiveRemainingByName = useMemo(() => {
+        const map = new Map<string, number>();
+        supplierDebtGroups.forEach(g => map.set(g.key, g.remainingAmount));
+        return map;
+    }, [supplierDebtGroups]);
+
+    const bankSuggestions = useMemo(() => {
+        const seen = new Set<string>();
+        const list: { label: string; subtitle: string }[] = [];
+
+        paymentMethods
+            .filter(m => m.type === 'Transfer Bank')
+            .forEach(m => {
+                const norm = m.name.trim().toLowerCase();
+                if (!seen.has(norm)) {
+                    seen.add(norm);
+                    list.push({ label: m.name.trim(), subtitle: 'Rekening Bank Terdaftar' });
+                }
+            });
+
+        bankInstallments.forEach(inst => {
+            const norm = inst.name.trim().toLowerCase();
+            if (norm && !seen.has(norm)) {
+                seen.add(norm);
+                list.push({ label: inst.name.trim(), subtitle: 'Cicilan Bank Aktif' });
+            }
+        });
+
+        COMMON_BANK_PRESETS.forEach(preset => {
+            const norm = preset.toLowerCase();
+            if (!seen.has(norm)) {
+                seen.add(norm);
+                list.push({ label: preset, subtitle: 'Referensi Bank / Kredit' });
+            }
+        });
+
+        return list;
+    }, [paymentMethods, bankInstallments]);
+
+    const filteredDropdownOptions = useMemo(() => {
+        const q = debtName.trim().toLowerCase();
+
+        const supplierOpts = suppliers
+            .filter(s => !q || s.name.toLowerCase().includes(q) || (s.specialty || '').toLowerCase().includes(q))
+            .map(s => ({
+                kind: 'supplier' as const,
+                label: s.name,
+                subtitle: s.specialty ? `Supplier • ${s.specialty}` : 'Supplier Master',
+                autoBillRemaining: supplierActiveRemainingByName.get(s.name.trim().toLowerCase()) || 0,
+            }));
+
+        const bankOpts = bankSuggestions
+            .filter(b => !q || b.label.toLowerCase().includes(q) || b.subtitle.toLowerCase().includes(q))
+            .map(b => ({
+                kind: 'bank' as const,
+                label: b.label,
+                subtitle: b.subtitle,
+                autoBillRemaining: 0,
+            }));
+
+        const exactMatchExists =
+            supplierOpts.some(o => o.label.toLowerCase() === q) ||
+            bankOpts.some(o => o.label.toLowerCase() === q);
+
+        return {
+            supplierOpts,
+            bankOpts,
+            showCustomCreate: q.length > 0 && !exactMatchExists,
+        };
+    }, [debtName, suppliers, bankSuggestions, supplierActiveRemainingByName]);
+
+    const matchedAutoSupplierDebt = useMemo(() => {
+        const q = debtName.trim().toLowerCase();
+        if (!q) return 0;
+        return supplierActiveRemainingByName.get(q) || 0;
+    }, [debtName, supplierActiveRemainingByName]);
 
     const handleAssetSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -321,12 +502,20 @@ const AssetsAndDebts: React.FC<{
 
     const handleDebtSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        const trimmedName = debtName.trim();
+        if (!trimmedName) {
+            alert('Pilih atau ketik nama hutang / kreditur terlebih dahulu.');
+            return;
+        }
         if (editingDebt) {
-            onUpdateDebt({ ...editingDebt, name: debtName, value: Number(debtValue) });
+            onUpdateDebt({ ...editingDebt, name: trimmedName, value: Number(debtValue) });
         } else {
-            onAddDebt({ name: debtName, value: Number(debtValue) });
+            onAddDebt({ name: trimmedName, value: Number(debtValue) });
         }
         setEditingDebt(null);
+        setDebtName('');
+        setDebtValue('');
+        setIsCreditorDropdownOpen(false);
     };
 
     const handleDeleteAssetClick = (asset: AssetItem) => {
@@ -343,15 +532,32 @@ const AssetsAndDebts: React.FC<{
 
     const totalAssets = assets.reduce((sum, a) => sum + a.value, 0);
     const totalDebts = debts.reduce((sum, d) => sum + d.value, 0);
-    const netWorth = totalAssets - totalDebts;
+    const totalSupplierDebt = supplierDebtGroups.reduce((sum, g) => sum + g.remainingAmount, 0);
+    const totalAllDebts = totalDebts + totalSupplierDebt;
+    const linkedDebtIds = new Set(bankInstallments.map(b => b.debtId).filter(Boolean));
+    const supplierNamesLowerSet = useMemo(
+        () => new Set(suppliers.map(s => s.name.trim().toLowerCase())),
+        [suppliers]
+    );
+    const netWorth = totalAssets - totalAllDebts;
 
     return (
         <div className="space-y-8">
-            <div className="bg-gray-50 p-6 rounded-lg border text-center">
-                <h3 className="text-lg font-semibold text-gray-600">Total Kekayaan Bersih (Aset - Hutang)</h3>
-                <p className={`text-3xl font-bold mt-2 ${netWorth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatCurrency(netWorth)}
-                </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gray-50 p-5 rounded-lg border text-center">
+                    <h3 className="text-sm font-semibold text-gray-600">Total Kekayaan Bersih (Aset - Semua Hutang)</h3>
+                    <p className={`text-2xl font-bold mt-1 ${netWorth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(netWorth)}
+                    </p>
+                </div>
+                <div className="bg-red-50 p-5 rounded-lg border border-red-200 text-center">
+                    <h3 className="text-sm font-semibold text-red-700">Hutang Bank / Umum / Saldo Awal</h3>
+                    <p className="text-2xl font-bold mt-1 text-red-600">{formatCurrency(totalDebts)}</p>
+                </div>
+                <div className="bg-amber-50 p-5 rounded-lg border border-amber-200 text-center">
+                    <h3 className="text-sm font-semibold text-amber-800">Hutang Pemasok Bahan (Otomatis)</h3>
+                    <p className="text-2xl font-bold mt-1 text-amber-700">{formatCurrency(totalSupplierDebt)}</p>
+                </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-4">
@@ -387,31 +593,261 @@ const AssetsAndDebts: React.FC<{
                 <div className="space-y-4">
                     <h3 className="text-xl font-bold text-gray-800">Hutang</h3>
                     <form onSubmit={handleDebtSubmit} className="p-4 border rounded-lg bg-gray-50 space-y-3">
-                        <h4 className="font-semibold text-gray-700">{editingDebt ? 'Edit Hutang' : 'Tambah Hutang Baru'}</h4>
-                        <input value={debtName} onChange={e => setDebtName(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nama Hutang (e.g., Cicilan Bank)" required />
-                        <input type="number" value={debtValue} onChange={e => setDebtValue(e.target.value)} className="w-full p-2 border rounded-md" placeholder="Nilai Hutang (Rp)" required />
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="font-semibold text-gray-700">{editingDebt ? 'Edit Hutang' : 'Tambah Hutang Baru'}</h4>
+                            <span className="text-[11px] text-gray-500">Khusus Bank / Leasing / Saldo Awal Lama</span>
+                        </div>
+
+                        {/* Kategori Fokus Dropdown */}
+                        <div className="grid grid-cols-3 gap-1.5">
+                            {(['Bank / Leasing', 'Saldo Awal Pemasok', 'Lainnya'] as const).map(mode => (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    onClick={() => {
+                                        setDebtCategoryMode(mode);
+                                        setIsCreditorDropdownOpen(true);
+                                    }}
+                                    className={`px-2 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                                        debtCategoryMode === mode
+                                            ? 'bg-pink-600 text-white border-pink-600 shadow-sm'
+                                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    {mode}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Searchable Combobox Kreditur (Supplier + Bank + Manual) */}
+                        <div className="relative" ref={creditorDropdownRef}>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                                Nama Kreditur / Hutang (Ketik untuk mencari Supplier atau Bank)
+                            </label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={debtName}
+                                    onFocus={() => setIsCreditorDropdownOpen(true)}
+                                    onChange={e => {
+                                        setDebtName(e.target.value);
+                                        setIsCreditorDropdownOpen(true);
+                                    }}
+                                    className="w-full p-2 pr-8 border rounded-md bg-white text-sm"
+                                    placeholder={
+                                        debtCategoryMode === 'Saldo Awal Pemasok'
+                                            ? 'Cari nama Supplier dari Data Master...'
+                                            : debtCategoryMode === 'Bank / Leasing'
+                                                ? 'Cari / ketik nama Bank atau Kredit (mis. KUR BRI)...'
+                                                : 'Ketik atau pilih nama kreditur...'
+                                    }
+                                    required
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCreditorDropdownOpen(prev => !prev)}
+                                    className="absolute inset-y-0 right-0 px-2 flex items-center text-gray-400 hover:text-gray-700"
+                                    tabIndex={-1}
+                                    aria-label="Tampilkan daftar kreditur"
+                                >
+                                    <ChevronDownIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+
+                            {isCreditorDropdownOpen && (
+                                <div className="absolute z-30 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-xl max-h-64 overflow-y-auto divide-y divide-gray-100">
+                                    {(debtCategoryMode === 'Saldo Awal Pemasok'
+                                        ? [
+                                              { title: 'Daftar Supplier (Data Master)', items: filteredDropdownOptions.supplierOpts },
+                                              { title: 'Bank / Kredit / Leasing', items: filteredDropdownOptions.bankOpts },
+                                          ]
+                                        : [
+                                              { title: 'Bank / Kredit / Leasing', items: filteredDropdownOptions.bankOpts },
+                                              { title: 'Daftar Supplier (Data Master)', items: filteredDropdownOptions.supplierOpts },
+                                          ]
+                                    ).map(group =>
+                                        group.items.length > 0 ? (
+                                            <div key={group.title} className="py-1">
+                                                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-gray-50">
+                                                    {group.title}
+                                                </div>
+                                                {group.items.map(opt => (
+                                                    <button
+                                                        key={`${group.title}-${opt.label}`}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setDebtName(opt.label);
+                                                            if (opt.kind === 'supplier') setDebtCategoryMode('Saldo Awal Pemasok');
+                                                            else setDebtCategoryMode('Bank / Leasing');
+                                                            setIsCreditorDropdownOpen(false);
+                                                        }}
+                                                        className="w-full text-left px-3 py-2 hover:bg-pink-50 flex items-center justify-between gap-2 text-sm"
+                                                    >
+                                                        <div>
+                                                            <p className="font-semibold text-gray-800">{opt.label}</p>
+                                                            <p className="text-[11px] text-gray-500">{opt.subtitle}</p>
+                                                        </div>
+                                                        {opt.autoBillRemaining > 0 && (
+                                                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 whitespace-nowrap">
+                                                                Otomatis: {formatCurrency(opt.autoBillRemaining)}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : null
+                                    )}
+
+                                    {filteredDropdownOptions.showCustomCreate && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsCreditorDropdownOpen(false)}
+                                            className="w-full text-left px-3 py-2 bg-gray-50 hover:bg-pink-50 text-xs font-semibold text-pink-700"
+                                        >
+                                            + Gunakan nama manual: &ldquo;{debtName.trim()}&rdquo;
+                                        </button>
+                                    )}
+
+                                    {filteredDropdownOptions.supplierOpts.length === 0 &&
+                                        filteredDropdownOptions.bankOpts.length === 0 &&
+                                        !filteredDropdownOptions.showCustomCreate && (
+                                            <div className="px-3 py-3 text-xs text-gray-500 text-center">
+                                                Ketik nama bank, supplier, atau kreditur.
+                                            </div>
+                                        )}
+                                </div>
+                            )}
+                        </div>
+
+                        {matchedAutoSupplierDebt > 0 && (
+                            <div className="p-2.5 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+                                <strong>Perhatian Anti-Dobel:</strong> Supplier <strong>{debtName.trim()}</strong> sudah memiliki hutang otomatis sebesar{' '}
+                                <strong>{formatCurrency(matchedAutoSupplierDebt)}</strong> dari Pembelian Kredit (terlihat di daftar Otomatis di bawah). Gunakan form ini{' '}
+                                <strong>hanya</strong> untuk saldo hutang lama sebelum sistem agar tidak terhitung ganda.
+                            </div>
+                        )}
+
+                        <input type="number" value={debtValue} onChange={e => setDebtValue(e.target.value)} className="w-full p-2 border rounded-md bg-white text-sm" placeholder="Nilai Hutang (Rp)" required />
                         <div className="flex space-x-2">
                             <button type="submit" className="w-full bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">{editingDebt ? 'Update' : 'Tambah Hutang'}</button>
                             {editingDebt && <button type="button" onClick={() => setEditingDebt(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300">Batal</button>}
                         </div>
                     </form>
-                    <div className="space-y-2 max-h-80 overflow-y-auto pr-2 border rounded-lg p-2">
-                        {debts.map(item => (
-                            <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
-                                <div>
-                                    <p className="font-semibold text-gray-800">{item.name}</p>
-                                    <p className="text-sm text-red-600 font-bold">{formatCurrency(item.value)}</p>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <button onClick={() => setEditingDebt(item)} className="p-1 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4" /></button>
-                                    <button onClick={() => handleDeleteDebtClick(item)} className="p-1 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4" /></button>
-                                </div>
+
+                    {/* Daftar 1: Hutang Pemasok Otomatis (Rekap per Supplier dari Pembelian Kredit) */}
+                    <div className="border border-amber-200 rounded-lg p-3 bg-amber-50/40 space-y-2">
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold uppercase tracking-wide text-amber-900">
+                                Hutang Pemasok (Otomatis dari Pembelian Kredit)
+                            </h4>
+                            <span className="text-xs font-bold text-amber-800">{formatCurrency(totalSupplierDebt)}</span>
+                        </div>
+                        {supplierDebtGroups.length > 0 ? (
+                            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                                {supplierDebtGroups.map(group => {
+                                    const isExpanded = expandedSupplierKey === group.key;
+                                    return (
+                                        <div key={group.key} className="bg-white border border-amber-200 rounded-lg p-2.5">
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        <p className="font-semibold text-gray-800 text-sm">{group.supplierName}</p>
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">
+                                                            Otomatis • {group.bills.length} Nota
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-gray-500 mt-0.5">
+                                                        Tagihan {formatCurrency(group.totalBillAmount)} • Terbayar {formatCurrency(group.totalPaidAmount)}
+                                                        {group.nearestDueDate ? ` • Jatuh tempo: ${formatDate(group.nearestDueDate)}` : ''}
+                                                    </p>
+                                                </div>
+                                                <div className="text-right flex-shrink-0">
+                                                    <p className="text-sm font-bold text-amber-700">{formatCurrency(group.remainingAmount)}</p>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setExpandedSupplierKey(isExpanded ? null : group.key)}
+                                                        className="text-[11px] text-pink-600 hover:underline font-medium"
+                                                    >
+                                                        {isExpanded ? 'Tutup Rincian' : 'Lihat Rincian Nota'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            {isExpanded && (
+                                                <div className="mt-2 pt-2 border-t border-amber-100 space-y-1.5">
+                                                    {group.bills.map(b => (
+                                                        <div key={b.id} className="flex justify-between items-center text-[11px] bg-amber-50/50 px-2 py-1 rounded">
+                                                            <div>
+                                                                <span className="font-semibold text-gray-800">{b.invoiceNumber}</span>
+                                                                <span className="text-gray-500"> • {formatDate(b.date)}</span>
+                                                                {b.description && <span className="text-gray-500"> — {b.description}</span>}
+                                                            </div>
+                                                            <span className="font-bold text-amber-800 whitespace-nowrap ml-2">{formatCurrency(b.remaining)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        ))}
+                        ) : (
+                            <p className="text-xs text-amber-800/80 py-1">Belum ada pembelian kredit yang belum lunas.</p>
+                        )}
                     </div>
-                    <div className="flex justify-between font-bold text-lg p-3 bg-red-50 rounded-lg">
-                        <span>Total Hutang</span>
-                        <span>{formatCurrency(totalDebts)}</span>
+
+                    {/* Daftar 2: Hutang Terdaftar Manual / Cicilan Bank */}
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-2 border rounded-lg p-2">
+                        <div className="flex items-center justify-between px-1 pb-1">
+                            <span className="text-xs font-bold uppercase tracking-wide text-gray-600">
+                                Hutang Terdaftar (Bank / Leasing / Saldo Awal)
+                            </span>
+                            <span className="text-xs font-bold text-red-600">{formatCurrency(totalDebts)}</span>
+                        </div>
+                        {debts.length > 0 ? debts.map(item => {
+                            const isSupplierMatch = supplierNamesLowerSet.has(item.name.trim().toLowerCase());
+                            const isLinkedBank = linkedDebtIds.has(item.id);
+                            return (
+                                <div key={item.id} className="bg-white border p-3 rounded-lg flex justify-between items-center">
+                                    <div>
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                            <p className="font-semibold text-gray-800">{item.name}</p>
+                                            {isLinkedBank && (
+                                                <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-semibold">
+                                                    Tersinkron Cicilan Bank
+                                                </span>
+                                            )}
+                                            {!isLinkedBank && isSupplierMatch && (
+                                                <span className="text-[10px] bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full font-semibold">
+                                                    Supplier (Saldo Awal / Manual)
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-sm text-red-600 font-bold">{formatCurrency(item.value)}</p>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <button onClick={() => setEditingDebt(item)} className="p-1 text-gray-500 hover:text-blue-600"><PencilIcon className="h-4 w-4" /></button>
+                                        <button onClick={() => handleDeleteDebtClick(item)} className="p-1 text-gray-500 hover:text-red-600"><TrashIcon className="h-4 w-4" /></button>
+                                    </div>
+                                </div>
+                            );
+                        }) : (
+                            <p className="text-xs text-gray-500 text-center py-3">Belum ada hutang terdaftar secara manual.</p>
+                        )}
+                    </div>
+
+                    <div className="p-3 bg-red-50 rounded-lg space-y-1">
+                        <div className="flex justify-between text-xs text-gray-600">
+                            <span>Hutang Bank / Umum / Saldo Awal</span>
+                            <span>{formatCurrency(totalDebts)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-amber-800">
+                            <span>Hutang Pemasok (Otomatis Pembelian)</span>
+                            <span>{formatCurrency(totalSupplierDebt)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-lg text-red-800 border-t border-red-200 pt-1">
+                            <span>Total Semua Hutang</span>
+                            <span>{formatCurrency(totalAllDebts)}</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -540,7 +976,7 @@ const LegacyReceivableImportExportModal: React.FC<{
 
 const Reports: React.FC<ReportsProps> = (props) => {
     const { 
-    allOrders, expenses, receivables, products, customers, inventory, categories, finishings,
+    allOrders, expenses, supplierBills, bankInstallments, privateExpenses, cashDrawerLogs = [], cashTransfers = [], receivables, products, customers, suppliers = [], paymentMethods = [], inventory, categories, finishings,
     menuPermissions, legacyMonthlyIncomes, legacyMonthlyExpenses, legacyReceivables, assets, debts, notificationSettings,
     onAddLegacyMonthlyIncome, onUpdateLegacyMonthlyIncome, onDeleteLegacyMonthlyIncome,
     onAddLegacyMonthlyExpense, onUpdateLegacyMonthlyExpense, onDeleteLegacyMonthlyExpense,
@@ -760,6 +1196,29 @@ const Reports: React.FC<ReportsProps> = (props) => {
         return { totalSales: totalIncome, totalExpenses: totalExpense, profit: totalIncome - totalExpense };
     }, [pnlIncomeTableData, pnlExpenseTableData]);
 
+    const pnlNonOperational = useMemo(() => {
+        const supplierPaid = supplierBills.reduce((sum, bill) => {
+            const inPeriod = bill.payments.filter(
+                p => p.date >= pnlStartDate && p.date <= pnlEndDate && (p.fundingSource === 'Kas Laci' || p.fundingSource === 'Transfer Bank')
+            );
+            return sum + inPeriod.reduce((ps, p) => ps + p.amount, 0);
+        }, 0);
+        const bankPaid = bankInstallments.reduce((sum, inst) => {
+            const inPeriod = inst.payments.filter(
+                p => p.date >= pnlStartDate && p.date <= pnlEndDate && (p.fundingSource === 'Kas Laci' || p.fundingSource === 'Transfer Bank')
+            );
+            return sum + inPeriod.reduce((ps, p) => ps + p.totalPaid, 0);
+        }, 0);
+        const privateStorePaid = privateExpenses
+            .filter(pe => pe.date >= pnlStartDate && pe.date <= pnlEndDate && pe.fundingSource !== 'Uang Pribadi Owner')
+            .reduce((sum, pe) => sum + pe.amount, 0);
+        const privateOwnerPaid = privateExpenses
+            .filter(pe => pe.date >= pnlStartDate && pe.date <= pnlEndDate && pe.fundingSource === 'Uang Pribadi Owner')
+            .reduce((sum, pe) => sum + pe.amount, 0);
+        const netCashflowAfterAll = pnlSummary.profit - supplierPaid - bankPaid - privateStorePaid;
+        return { supplierPaid, bankPaid, privateStorePaid, privateOwnerPaid, netCashflowAfterAll };
+    }, [supplierBills, bankInstallments, privateExpenses, pnlStartDate, pnlEndDate, pnlSummary.profit]);
+
 
     const pnlChartData = useMemo(() => {
         if (pnlFilterType === 'month') {
@@ -791,6 +1250,33 @@ const Reports: React.FC<ReportsProps> = (props) => {
     }, [pnlFilterType, pnlSelectedMonth, pnlSelectedYear, pnlFilteredReceivables, pnlFilteredExpenses, pnlFilteredLegacyIncomes, pnlFilteredLegacyExpenses, pnlStartDate, pnlEndDate]);
     
     // --- END P&L LOGIC ---
+
+    // Perhitungan kumulatif terpadu (dibagi bersama halaman Arus Kas agar Saldo Akhir Estimasi selalu 100% sama)
+    const globalFinancialRecap = useMemo(
+        () =>
+            calculateGlobalFinancialRecap({
+                legacyMonthlyIncomes,
+                legacyMonthlyExpenses,
+                receivables,
+                expenses,
+                supplierBills,
+                bankInstallments,
+                privateExpenses,
+                cashDrawerLogs,
+                cashTransfers,
+            }),
+        [
+            legacyMonthlyIncomes,
+            legacyMonthlyExpenses,
+            receivables,
+            expenses,
+            supplierBills,
+            bankInstallments,
+            privateExpenses,
+            cashDrawerLogs,
+            cashTransfers,
+        ]
+    );
 
     const handleExport = () => {
         let dateRange: { startDate: string, endDate: string };
@@ -1048,19 +1534,9 @@ const Reports: React.FC<ReportsProps> = (props) => {
     
     // --- FINAL RECAP CALCULATIONS ---
     const finalRecapData = useMemo(() => {
-        const totalLegacyIncome = legacyMonthlyIncomes.reduce((sum, i) => sum + i.amount, 0);
-        const totalLegacyExpense = legacyMonthlyExpenses.reduce((sum, e) => sum + e.amount, 0);
-        
-        const newSystemIncome = receivables.reduce((sum, r) => {
-            const totalPaid = r.payments?.reduce((pSum, p) => pSum + p.amount, 0) || 0;
-            return sum + totalPaid;
-        }, 0);
-        
-        const newSystemExpense = expenses.reduce((sum, e) => sum + e.amount, 0);
-
-        const totalIncome = totalLegacyIncome + newSystemIncome;
-        const totalExpense = totalLegacyExpense + newSystemExpense;
-        const finalBalance = totalIncome - totalExpense;
+        const totalIncome = globalFinancialRecap.totalIncomeAll;
+        const totalExpense = globalFinancialRecap.totalExpenseAll;
+        const finalBalance = globalFinancialRecap.netEstimatedEndingCash;
 
         const totalPiutangLegacy = legacyReceivables.reduce((sum, r) => sum + r.amount, 0);
         const totalPiutangNew = receivables
@@ -1118,7 +1594,7 @@ const Reports: React.FC<ReportsProps> = (props) => {
             receivablesThisYearAmount, totalSalesThisYear,
             chartData: monthlyIncomeData
         };
-    }, [receivables, expenses, allOrders, legacyMonthlyIncomes, legacyMonthlyExpenses, legacyReceivables, selectedYear]);
+    }, [globalFinancialRecap, receivables, expenses, allOrders, legacyMonthlyIncomes, legacyReceivables, selectedYear]);
 
 
     // --- FILTERED DATA FOR OTHER TABS ---
@@ -1492,15 +1968,60 @@ const Reports: React.FC<ReportsProps> = (props) => {
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                 <div className="lg:col-span-2 space-y-4">
-                    <div className="bg-gray-50 p-4 rounded-lg border h-full">
-                        <h4 className="font-bold text-lg mb-2">Rincian Keuangan (Keseluruhan)</h4>
-                        <div className="space-y-2 text-sm">
-                            <div className="flex justify-between"><span>Total Pemasukan</span><span className="font-semibold text-green-600">{formatCurrency(finalRecapData.totalIncome)}</span></div>
-                            <div className="flex justify-between"><span>Total Pengeluaran</span><span className="font-semibold text-red-600">{formatCurrency(finalRecapData.totalExpense)}</span></div>
-                            <div className="flex justify-between font-bold border-t pt-2 mt-2"><span>Total Saldo</span><span className="text-blue-600">{formatCurrency(finalRecapData.finalBalance)}</span></div>
+                    <div className="bg-gray-50 p-4 rounded-lg border h-full flex flex-col justify-between">
+                        <div>
+                            <h4 className="font-bold text-lg mb-3">Rincian Keuangan (Keseluruhan)</h4>
+                            <div className="space-y-2 text-sm">
+                                <div className="flex justify-between">
+                                    <span className="text-gray-600">Pemasukan Order & Data Lama</span>
+                                    <span className="font-semibold text-green-600">+ {formatCurrency(globalFinancialRecap.legacyIncome + globalFinancialRecap.orderIncome)}</span>
+                                </div>
+                                {globalFinancialRecap.suntikModalIn > 0 && (
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Suntik Modal Owner</span>
+                                        <span className="font-semibold text-green-600">+ {formatCurrency(globalFinancialRecap.suntikModalIn)}</span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between">
+                                    <span className="text-gray-600">Pengeluaran Operasional & Data Lama</span>
+                                    <span className="font-semibold text-red-600">- {formatCurrency(globalFinancialRecap.legacyExpense + globalFinancialRecap.operationalExpense)}</span>
+                                </div>
+                                <div className="flex justify-between text-xs text-gray-500 border-t pt-1.5">
+                                    <span>Subtotal Saldo Operasional (Klasik)</span>
+                                    <span className="font-semibold">{formatCurrency(globalFinancialRecap.grossEstimatedBalance)}</span>
+                                </div>
+                                <div className="pt-2 border-t space-y-1.5 text-xs">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Bayar Tagihan Pemasok (Kas Toko)</span>
+                                        <span className="font-semibold text-amber-700">- {formatCurrency(globalFinancialRecap.supplierStorePaid)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Bayar Cicilan Bank (Kas Toko)</span>
+                                        <span className="font-semibold text-purple-700">- {formatCurrency(globalFinancialRecap.bankStorePaid)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Pribadi / Jamuan (Kas Toko)</span>
+                                        <span className="font-semibold text-rose-700">- {formatCurrency(globalFinancialRecap.privateStorePaid)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Setor & Tarik Owner + Admin Mutasi</span>
+                                        <span className="font-semibold text-fuchsia-700">- {formatCurrency(globalFinancialRecap.setorOwnerOut + globalFinancialRecap.tarikOwnerOut + globalFinancialRecap.transferAdminFeeOut)}</span>
+                                    </div>
+                                </div>
+                                <div className="flex justify-between font-bold text-base border-t pt-2.5 mt-2">
+                                    <span>Saldo Akhir (Estimasi)</span>
+                                    <span className="text-blue-600">{formatCurrency(finalRecapData.finalBalance)}</span>
+                                </div>
+                            </div>
                         </div>
-                         <div className="space-y-2 text-sm mt-4">
-                            <div className="flex justify-between font-bold border-t pt-2 mt-2"><span>Total Piutang</span><span className="text-amber-600">{formatCurrency(finalRecapData.totalPiutang)}</span></div>
+                        <div className="space-y-2 text-sm mt-4">
+                            <div className="flex justify-between font-bold border-t pt-2.5">
+                                <span>Total Piutang (Belum Lunas)</span>
+                                <span className="text-amber-600">{formatCurrency(finalRecapData.totalPiutang)}</span>
+                            </div>
+                            <p className="text-[11px] text-gray-500">
+                                Nilai <strong>Saldo Akhir (Estimasi)</strong> di atas tersinkron 100% dengan tab <strong>Arus Kas</strong>.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1575,12 +2096,38 @@ const Reports: React.FC<ReportsProps> = (props) => {
                         <td className="p-2 text-right font-semibold">{formatCurrency(item.total)}</td>
                     </tr>))}</tbody><tfoot className="bg-gray-100 font-bold"><tr><td className="p-2">Total Pendapatan</td><td className="p-2 text-right">{formatCurrency(pnlSummary.totalSales)}</td></tr></tfoot></table></div>
                 </div>
-                 <div>
-                    <h4 className="font-bold text-lg mb-2 text-red-700">Rincian Pengeluaran</h4>
+                  <div>
+                    <h4 className="font-bold text-lg mb-2 text-red-700">Rincian Pengeluaran Operasional</h4>
                     <div className="border rounded-lg overflow-hidden"><table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="p-2 text-left">Kategori</th><th className="p-2 text-right">Total</th></tr></thead><tbody className="divide-y">{pnlExpenseTableData.map(item => (<tr key={item.name}>
                         <td className="p-2">{item.name}</td>
                         <td className="p-2 text-right font-semibold">{formatCurrency(item.total)}</td>
-                    </tr>))}</tbody><tfoot className="bg-gray-100 font-bold"><tr><td className="p-2">Total Pengeluaran</td><td className="p-2 text-right">{formatCurrency(pnlSummary.totalExpenses)}</td></tr></tfoot></table></div>
+                    </tr>))}</tbody><tfoot className="bg-gray-100 font-bold"><tr><td className="p-2">Total Pengeluaran Operasional</td><td className="p-2 text-right">{formatCurrency(pnlSummary.totalExpenses)}</td></tr></tfoot></table></div>
+                </div>
+            </div>
+            <div className="bg-gray-50 border rounded-xl p-5">
+                <h4 className="font-bold text-base text-gray-800 mb-3">Ringkasan Arus Kas Non-Operasional & Kewajiban (Di luar Laba Usaha)</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                    <div className="bg-white p-3 rounded-lg border">
+                        <p className="text-xs text-gray-500">Bayar Tagihan Pemasok</p>
+                        <p className="font-bold text-amber-700 mt-1">{formatCurrency(pnlNonOperational.supplierPaid)}</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg border">
+                        <p className="text-xs text-gray-500">Bayar Cicilan Bank</p>
+                        <p className="font-bold text-purple-700 mt-1">{formatCurrency(pnlNonOperational.bankPaid)}</p>
+                    </div>
+                    <div className="bg-white p-3 rounded-lg border">
+                        <p className="text-xs text-gray-500">Pribadi / Jamuan (Kas Toko)</p>
+                        <p className="font-bold text-rose-700 mt-1">{formatCurrency(pnlNonOperational.privateStorePaid)}</p>
+                        {pnlNonOperational.privateOwnerPaid > 0 && (
+                            <p className="text-[11px] text-gray-400 mt-0.5">+ Dana Pribadi Owner: {formatCurrency(pnlNonOperational.privateOwnerPaid)}</p>
+                        )}
+                    </div>
+                    <div className="bg-white p-3 rounded-lg border border-blue-200">
+                        <p className="text-xs text-gray-500">Sisa Arus Kas Setelah Cicilan & Non-Opr</p>
+                        <p className={`font-extrabold mt-1 ${pnlNonOperational.netCashflowAfterAll >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                            {formatCurrency(pnlNonOperational.netCashflowAfterAll)}
+                        </p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1942,6 +2489,10 @@ const Reports: React.FC<ReportsProps> = (props) => {
                 {activeTab === 'assetsDebts' && (
                     <AssetsAndDebts 
                         assets={assets} debts={debts}
+                        bankInstallments={bankInstallments}
+                        supplierBills={supplierBills}
+                        suppliers={suppliers}
+                        paymentMethods={paymentMethods}
                         onAddAsset={onAddAsset} onUpdateAsset={onUpdateAsset} onDeleteAsset={onDeleteAsset}
                         onAddDebt={onAddDebt} onUpdateDebt={onUpdateDebt} onDeleteDebt={onDeleteDebt}
                     />
