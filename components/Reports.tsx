@@ -1197,15 +1197,16 @@ const Reports: React.FC<ReportsProps> = (props) => {
     }, [pnlIncomeTableData, pnlExpenseTableData]);
 
     const pnlNonOperational = useMemo(() => {
+        const isStoreFund = (src: string) => src === 'Kas Laci' || src === 'Transfer Bank' || src === 'Kas Dipegang Owner';
         const supplierPaid = supplierBills.reduce((sum, bill) => {
             const inPeriod = bill.payments.filter(
-                p => p.date >= pnlStartDate && p.date <= pnlEndDate && (p.fundingSource === 'Kas Laci' || p.fundingSource === 'Transfer Bank')
+                p => p.date >= pnlStartDate && p.date <= pnlEndDate && isStoreFund(p.fundingSource)
             );
             return sum + inPeriod.reduce((ps, p) => ps + p.amount, 0);
         }, 0);
         const bankPaid = bankInstallments.reduce((sum, inst) => {
             const inPeriod = inst.payments.filter(
-                p => p.date >= pnlStartDate && p.date <= pnlEndDate && (p.fundingSource === 'Kas Laci' || p.fundingSource === 'Transfer Bank')
+                p => p.date >= pnlStartDate && p.date <= pnlEndDate && isStoreFund(p.fundingSource)
             );
             return sum + inPeriod.reduce((ps, p) => ps + p.totalPaid, 0);
         }, 0);

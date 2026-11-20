@@ -1415,6 +1415,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                 >
                   <option value="Kas Laci">Kas Laci (Tunai) — Memotong Laci</option>
                   <option value="Transfer Bank">Transfer Bank / Non-Laci — Tidak Memotong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                 </select>
               </div>
               {opFundingSource === 'Transfer Bank' && nonCashAccounts.length > 0 && (
@@ -1559,6 +1560,8 @@ const Expenses: React.FC<ExpensesProps> = ({
                             className={`inline-block mt-0.5 px-2 py-0.5 text-[11px] font-semibold rounded-full ${
                               funding === 'Kas Laci'
                                 ? 'bg-amber-100 text-amber-800'
+                                : funding === 'Kas Dipegang Owner'
+                                ? 'bg-fuchsia-100 text-fuchsia-800'
                                 : 'bg-indigo-100 text-indigo-800'
                             }`}
                           >
@@ -2357,6 +2360,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                   <option value="Uang Pribadi Owner">Uang Pribadi Owner (Tidak Potong Kas Toko)</option>
                   <option value="Transfer Bank">Transfer Rekening Usaha</option>
                   <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                 </select>
               </div>
               {privFunding === 'Transfer Bank' && nonCashAccounts.length > 0 && (
@@ -2519,6 +2523,8 @@ const Expenses: React.FC<ExpensesProps> = ({
                               ? 'bg-amber-100 text-amber-800'
                               : item.fundingSource === 'Transfer Bank'
                               ? 'bg-indigo-100 text-indigo-800'
+                              : item.fundingSource === 'Kas Dipegang Owner'
+                              ? 'bg-fuchsia-100 text-fuchsia-800'
                               : 'bg-gray-200 text-gray-800'
                           }`}
                         >
@@ -3133,6 +3139,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                   >
                     <option value="Transfer Bank">Transfer Rekening Usaha</option>
                     <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                    <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                     <option value="Dana Owner">Dana Pribadi Owner</option>
                     <option value="Sistem Lama (Sudah Tercatat)">Sistem Lama / Sudah Tercatat (Tidak Potong Kas)</option>
                   </select>
@@ -3231,6 +3238,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                 <select value={billPayFunding} onChange={e => setBillPayFunding(e.target.value as InstallmentFundingSource)} className="mt-1 w-full p-2 border rounded-md bg-white text-sm">
                   <option value="Transfer Bank">Transfer Rekening Usaha</option>
                   <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                   <option value="Dana Owner">Dana Pribadi Owner</option>
                   <option value="Sistem Lama (Sudah Tercatat)">Sistem Lama / Sudah Tercatat (Tidak Potong Kas)</option>
                 </select>
@@ -3350,6 +3358,10 @@ const Expenses: React.FC<ExpensesProps> = ({
                             ) : p.fundingSource === 'Dana Owner' ? (
                               <span className="inline-block px-2 py-0.5 text-[11px] font-semibold rounded-full bg-amber-100 text-amber-800">
                                 Dana Owner
+                              </span>
+                            ) : p.fundingSource === 'Kas Dipegang Owner' ? (
+                              <span className="inline-block px-2 py-0.5 text-[11px] font-semibold rounded-full bg-fuchsia-100 text-fuchsia-800">
+                                Kas Dipegang Owner
                               </span>
                             ) : (
                               <span>{p.fundingSource}{p.fundingAccountName ? ` (${p.fundingAccountName})` : ''}</span>
@@ -3566,6 +3578,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                 <select value={bankPayFunding} onChange={e => setBankPayFunding(e.target.value as InstallmentFundingSource)} className="mt-1 w-full p-2 border rounded-md bg-white text-sm">
                   <option value="Transfer Bank">Transfer Rekening Usaha</option>
                   <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                   <option value="Dana Owner">Dana Pribadi Owner</option>
                   <option value="Sistem Lama (Sudah Tercatat)">Sistem Lama / Sudah Tercatat (Tidak Potong Kas)</option>
                 </select>
@@ -3664,6 +3677,10 @@ const Expenses: React.FC<ExpensesProps> = ({
                           ) : p.fundingSource === 'Dana Owner' ? (
                             <span className="inline-block px-2 py-0.5 text-[11px] font-semibold rounded-full bg-amber-100 text-amber-800">
                               Dana Owner
+                            </span>
+                          ) : p.fundingSource === 'Kas Dipegang Owner' ? (
+                            <span className="inline-block px-2 py-0.5 text-[11px] font-semibold rounded-full bg-fuchsia-100 text-fuchsia-800">
+                              Kas Dipegang Owner
                             </span>
                           ) : (
                             <span>{p.fundingSource}{p.fundingAccountName ? ` (${p.fundingAccountName})` : ''}</span>
@@ -3768,6 +3785,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                 <select value={editOpFunding} onChange={e => setEditOpFunding(e.target.value as ExpenseFundingSource)} className="mt-1 w-full p-2 border rounded-md bg-white text-sm">
                   <option value="Kas Laci">Kas Laci (Tunai) — Memotong Laci</option>
                   <option value="Transfer Bank">Transfer Bank / Non-Laci — Tidak Memotong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                 </select>
               </div>
               {editOpFunding === 'Transfer Bank' && nonCashAccounts.length > 0 && (
@@ -3881,6 +3899,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                 <select value={editBillPayFunding} onChange={e => setEditBillPayFunding(e.target.value as InstallmentFundingSource)} className="mt-1 w-full p-2 border rounded-md bg-white text-sm">
                   <option value="Transfer Bank">Transfer Rekening Usaha</option>
                   <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                   <option value="Dana Owner">Dana Pribadi Owner</option>
                   <option value="Sistem Lama (Sudah Tercatat)">Sistem Lama / Sudah Tercatat (Tidak Potong Kas)</option>
                 </select>
@@ -3993,6 +4012,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                 <select value={editBankPayFunding} onChange={e => setEditBankPayFunding(e.target.value as InstallmentFundingSource)} className="mt-1 w-full p-2 border rounded-md bg-white text-sm">
                   <option value="Transfer Bank">Transfer Rekening Usaha</option>
                   <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                   <option value="Dana Owner">Dana Pribadi Owner</option>
                   <option value="Sistem Lama (Sudah Tercatat)">Sistem Lama / Sudah Tercatat (Tidak Potong Kas)</option>
                 </select>
@@ -4066,6 +4086,7 @@ const Expenses: React.FC<ExpensesProps> = ({
                   <option value="Uang Pribadi Owner">Uang Pribadi Owner (Tidak Potong Kas Toko)</option>
                   <option value="Transfer Bank">Transfer Rekening Usaha</option>
                   <option value="Kas Laci">Kas Laci (Tunai) — Potong Laci</option>
+                  <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                 </select>
               </div>
               {editPrivFunding === 'Transfer Bank' && nonCashAccounts.length > 0 && (

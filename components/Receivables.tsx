@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, type SavedOrder, type KanbanData, type CardData, type ProductData, type FinishingData, type OrderItemData, type Payment, type CustomerData, type CategoryData, type ExpenseItem, type ExpenseMetadata, type SupplierBill, type BankInstallment, type PrivateExpenseItem, type PaymentMethod, type NotificationSettings, type NotificationItem, type LegacyReceivable, type CashDrawerState, type CashDrawerLog, type CashTransferRecord } from '../types';
-import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon, ClipboardIcon, CalendarDaysIcon, ArrowUpTrayIcon } from './Icons';
+import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon, ClipboardIcon, CalendarDaysIcon, ArrowUpTrayIcon, TrashIcon } from './Icons';
+import { OWNER_HOLD_ACCOUNT_ID, OWNER_HOLD_ACCOUNT_NAME } from './cashFlowUtils';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -549,42 +550,131 @@ const BulkPaymentModal: React.FC<{
 const InitialCashModal: React.FC<{
   currentAmount: number;
   currentStartDate: string;
+  today: string;
+  expectedCash: number;
+  periodNetChange: number;
+  rawTodayMetrics: {
+    rawCashInToday: number;
+    rawCashOutToday: number;
+    rawTransferInToday: number;
+    rawTransferOutToday: number;
+  };
   onClose: () => void;
-  onSave: (amount: number, periodStartDate: string, notes?: string) => void;
-}> = ({ currentAmount, currentStartDate, onClose, onSave }) => {
+  onSave: (
+    amount: number,
+    periodStartDate: string,
+    notes?: string,
+    settledOverride?: {
+      rawCashInToday: number;
+      rawCashOutToday: number;
+      rawTransferInToday: number;
+      rawTransferOutToday: number;
+    }
+  ) => void;
+}> = ({ currentAmount, currentStartDate, today, expectedCash, periodNetChange, rawTodayMetrics, onClose, onSave }) => {
   const [amount, setAmount] = useState(currentAmount.toString());
   const [periodStartDate, setPeriodStartDate] = useState(currentStartDate);
   const [notes, setNotes] = useState('');
+  const [syncToPhysicalNow, setSyncToPhysicalNow] = useState(false);
+
+  const numericAmount = parseFloat(amount);
+  const validAmount = !isNaN(numericAmount) && numericAmount >= 0 ? numericAmount : 0;
+
+  const projectedEndingCash = syncToPhysicalNow
+    ? validAmount
+    : periodStartDate === currentStartDate
+      ? validAmount + periodNetChange
+      : validAmount;
+
+  const handleToggleSyncNow = () => {
+    setSyncToPhysicalNow(true);
+    setPeriodStartDate(today);
+    if (expectedCash < 0 || !amount.trim()) {
+      setAmount('0');
+    } else {
+      setAmount(expectedCash.toString());
+    }
+    if (!notes.trim()) {
+      setNotes(`Samakan saldo laci ke uang fisik real per ${formatDate(today)}`);
+    }
+  };
 
   const handleSave = () => {
-    const numericAmount = parseFloat(amount);
     if (!isNaN(numericAmount) && numericAmount >= 0 && periodStartDate) {
-      onSave(numericAmount, periodStartDate, notes.trim() || undefined);
+      onSave(
+        numericAmount,
+        syncToPhysicalNow ? today : periodStartDate,
+        notes.trim() || undefined,
+        syncToPhysicalNow ? rawTodayMetrics : undefined
+      );
       onClose();
     } else {
-      alert('Masukkan jumlah kas awal dan tanggal mulai periode yang valid.');
+      alert('Masukkan jumlah kas awal / uang fisik dan tanggal mulai periode yang valid.');
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center border-b pb-3 mb-4">
-          <h3 className="text-xl font-bold text-gray-800">Atur Kas Awal Laci</h3>
+          <h3 className="text-xl font-bold text-gray-800">Atur &amp; Koreksi Kas Laci</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
         </div>
         <div className="space-y-4">
-          <p className="text-sm text-gray-600">
-            Atur nominal modal/uang kembalian di laci pada awal periode. Kas laci akan terus berakumulasi antar hari hingga Anda menekan tombol <strong>Setor Dana</strong>.
-          </p>
+          <div className={`p-3 rounded-lg border flex justify-between items-center text-sm ${
+            expectedCash < 0 ? 'bg-red-50 border-red-300 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-800'
+          }`}>
+            <div>
+              <p className="font-semibold">Kas Akhir (Laci) Sistem Saat Ini</p>
+              <p className="text-xs opacity-80">Periode sejak {formatDate(currentStartDate)}</p>
+            </div>
+            <p className={`text-lg font-bold ${expectedCash < 0 ? 'text-red-700' : 'text-purple-700'}`}>
+              {formatCurrency(expectedCash)}
+            </p>
+          </div>
+
+          <div className="p-3 bg-sky-50 border border-sky-200 rounded-lg space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold text-sky-900">Koreksi Cepat Jika Laci Minus / Keliru</p>
+              {!syncToPhysicalNow ? (
+                <button
+                  type="button"
+                  onClick={handleToggleSyncNow}
+                  className="px-3 py-1.5 text-xs font-bold bg-sky-600 text-white rounded-lg hover:bg-sky-700 shadow-sm"
+                >
+                  Samakan ke Saldo Fisik Sekarang
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSyncToPhysicalNow(false);
+                    setAmount(currentAmount.toString());
+                    setPeriodStartDate(currentStartDate);
+                  }}
+                  className="px-2.5 py-1 text-xs font-semibold bg-white text-gray-700 border rounded-md hover:bg-gray-100"
+                >
+                  Batal Mode Cepat (Ubah Manual)
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-sky-800">
+              {syncToPhysicalNow
+                ? 'Mode Koreksi Cepat aktif: masukkan uang fisik yang benar-benar ada di laci saat ini. Transaksi sebelum jam koreksi hari ini otomatis di-offset tanpa menghapus riwayat pengeluaran/pembayaran lama.'
+                : 'Klik tombol di atas jika laci terlanjur minus (misal baru mencatat pengeluaran lama) atau salah hitung, agar saldo laci langsung disamakan dengan uang fisik saat ini.'}
+            </p>
+          </div>
+
           <div>
-            <label htmlFor="initial-cash" className="block text-sm font-medium text-gray-700">Jumlah Kas Awal Laci (Rp)</label>
+            <label htmlFor="initial-cash" className="block text-sm font-medium text-gray-700">
+              {syncToPhysicalNow ? 'Uang Fisik Real di Laci Saat Ini (Rp)' : 'Jumlah Kas Awal Laci (Rp)'}
+            </label>
             <input
               type="number"
               id="initial-cash"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="mt-1 w-full p-2 border border-gray-300 rounded-md"
+              className="mt-1 w-full p-2.5 border border-gray-300 rounded-md font-semibold"
               placeholder="e.g., 200000"
             />
           </div>
@@ -593,13 +683,16 @@ const InitialCashModal: React.FC<{
             <input
               type="date"
               id="period-start-date"
-              value={periodStartDate}
+              value={syncToPhysicalNow ? today : periodStartDate}
               max={getLocalDateString()}
+              disabled={syncToPhysicalNow}
               onChange={(e) => setPeriodStartDate(e.target.value)}
-              className="mt-1 w-full p-2 border border-gray-300 rounded-md"
+              className="mt-1 w-full p-2 border border-gray-300 rounded-md disabled:bg-gray-100"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Ubah tanggal ini jika ingin menghitung ulang akumulasi beberapa hari terakhir yang belum disetor.
+              {syncToPhysicalNow
+                ? 'Otomatis memakai tanggal hari ini karena mode Samakan ke Saldo Fisik Sekarang sedang aktif.'
+                : 'Ubah tanggal ini jika ingin menghitung ulang akumulasi beberapa hari terakhir yang belum disetor.'}
             </p>
           </div>
           <div>
@@ -610,8 +703,14 @@ const InitialCashModal: React.FC<{
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
-              placeholder="Contoh: Tambah pecahan kembalian dari owner"
+              placeholder="Contoh: Tambah pecahan kembalian / koreksi saldo fisik laci"
             />
+          </div>
+          <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 flex justify-between items-center text-xs">
+            <span className="font-semibold text-purple-900">Preview Kas Akhir (Laci) Setelah Disimpan:</span>
+            <span className={`text-base font-bold ${projectedEndingCash < 0 ? 'text-red-600' : 'text-purple-700'}`}>
+              {formatCurrency(projectedEndingCash)}
+            </span>
           </div>
         </div>
         <div className="mt-6 flex justify-end space-x-3 border-t pt-4">
@@ -646,6 +745,7 @@ const DepositCashModal: React.FC<{
     depositAmount: number;
     physicalCash?: number;
     recipient: string;
+    depositMode: 'owner_hold' | 'bank_account' | 'owner_prive';
     depositToAccountId?: string;
     depositToAccountName?: string;
     notes?: string;
@@ -668,7 +768,8 @@ const DepositCashModal: React.FC<{
   const [physicalCashInput, setPhysicalCashInput] = useState('');
   const [depositAmountInput, setDepositAmountInput] = useState(Math.max(0, expectedCash).toString());
   const [recipient, setRecipient] = useState('Owner');
-  const [depositToAccountId, setDepositToAccountId] = useState('');
+  const [depositMode, setDepositMode] = useState<'owner_hold' | 'bank_account' | 'owner_prive'>('owner_hold');
+  const [depositToAccountId, setDepositToAccountId] = useState(nonCashAccounts[0]?.id || '');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -698,15 +799,26 @@ const DepositCashModal: React.FC<{
       alert('Nama penerima setor harus diisi.');
       return;
     }
-    const destAccount = nonCashAccounts.find(a => a.id === depositToAccountId);
+    if (depositMode === 'bank_account' && !depositToAccountId) {
+      alert('Pilih rekening bank tujuan setoran.');
+      return;
+    }
+    const destAccount = depositMode === 'bank_account'
+      ? nonCashAccounts.find(a => a.id === depositToAccountId)
+      : undefined;
     setIsSubmitting(true);
     try {
       await onConfirmSetor({
         depositAmount,
         physicalCash,
         recipient: recipient.trim(),
-        depositToAccountId: destAccount?.id,
-        depositToAccountName: destAccount?.name,
+        depositMode,
+        depositToAccountId: depositMode === 'owner_hold'
+          ? OWNER_HOLD_ACCOUNT_ID
+          : destAccount?.id,
+        depositToAccountName: depositMode === 'owner_hold'
+          ? OWNER_HOLD_ACCOUNT_NAME
+          : destAccount?.name,
         notes: notes.trim() || undefined,
       });
       onClose();
@@ -847,6 +959,66 @@ const DepositCashModal: React.FC<{
             <p className="text-xl font-bold">{formatCurrency(remainingCash)}</p>
           </div>
 
+          {/* Deposit Purpose / Destination */}
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-gray-700">Tujuan / Status Dana Disetor</label>
+            <div className="grid grid-cols-1 gap-2">
+              <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-colors ${
+                depositMode === 'owner_hold' ? 'bg-purple-50 border-purple-400 ring-1 ring-purple-300' : 'bg-white border-gray-200 hover:bg-gray-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="depositMode"
+                  checked={depositMode === 'owner_hold'}
+                  onChange={() => setDepositMode('owner_hold')}
+                  className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                />
+                <div className="text-xs">
+                  <div className="font-bold text-gray-900">Dibawa / Titip Owner (Masih Uang Toko)</div>
+                  <p className="text-gray-600 mt-0.5">
+                    Uang sementara dibawa/disimpan owner atau brankas. Saldo berpindah ke kantong <strong>Kas Dipegang Owner</strong> — tetap aset toko (tidak memotong Saldo Usaha) &amp; bisa dipindah ke Rekening Bank kapan saja tanpa menjadi dana talangan.
+                  </p>
+                </div>
+              </label>
+
+              <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-colors ${
+                depositMode === 'bank_account' ? 'bg-sky-50 border-sky-400 ring-1 ring-sky-300' : 'bg-white border-gray-200 hover:bg-gray-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="depositMode"
+                  checked={depositMode === 'bank_account'}
+                  onChange={() => setDepositMode('bank_account')}
+                  className="mt-0.5 text-sky-600 focus:ring-sky-500"
+                />
+                <div className="text-xs flex-1">
+                  <div className="font-bold text-gray-900">Langsung Setor ke Rekening Bank Toko</div>
+                  <p className="text-gray-600 mt-0.5">
+                    Uang laci langsung masuk menambah saldo rekening bank toko di Arus Kas.
+                  </p>
+                </div>
+              </label>
+
+              <label className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-colors ${
+                depositMode === 'owner_prive' ? 'bg-rose-50 border-rose-400 ring-1 ring-rose-300' : 'bg-white border-gray-200 hover:bg-gray-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="depositMode"
+                  checked={depositMode === 'owner_prive'}
+                  onChange={() => setDepositMode('owner_prive')}
+                  className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                />
+                <div className="text-xs">
+                  <div className="font-bold text-gray-900">Diambil Permanen Owner (Prive / Keluar Usaha)</div>
+                  <p className="text-gray-600 mt-0.5">
+                    Uang diambil permanen oleh owner untuk keperluan pribadi. Akan memotong total Saldo Akhir Kas Usaha.
+                  </p>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">Disetor Kepada</label>
@@ -858,32 +1030,47 @@ const DepositCashModal: React.FC<{
                 placeholder="Owner / Admin Keuangan"
               />
             </div>
+            {depositMode === 'bank_account' ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Pilih Rekening Bank Tujuan</label>
+                <select
+                  value={depositToAccountId}
+                  onChange={(e) => setDepositToAccountId(e.target.value)}
+                  className="mt-1 w-full p-2 border border-sky-300 rounded-md bg-sky-50/40 text-sm"
+                >
+                  {nonCashAccounts.length === 0 && <option value="">Belum ada rekening non-tunai</option>}
+                  {nonCashAccounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name} ({acc.type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Catatan Setoran (Opsional)</label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
+                  placeholder={depositMode === 'owner_hold' ? 'Contoh: Dibawa owner malam ini, besok setor BCA' : 'Contoh: Prive owner'}
+                />
+              </div>
+            )}
+          </div>
+          {depositMode === 'bank_account' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700">Masuk ke Rekening Mana? (Opsional)</label>
-              <select
-                value={depositToAccountId}
-                onChange={(e) => setDepositToAccountId(e.target.value)}
-                className="mt-1 w-full p-2 border border-gray-300 rounded-md bg-white text-sm"
-              >
-                <option value="">Dipegang Owner / Di Luar Rekening Toko</option>
-                {nonCashAccounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>
-                    Setor ke {acc.name} ({acc.type})
-                  </option>
-                ))}
-              </select>
+              <label className="block text-sm font-medium text-gray-700">Catatan Setoran (Opsional)</label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
+                placeholder="Contoh: Setoran laci 4 hari / setor tunai ke BCA"
+              />
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Catatan Setoran (Opsional)</label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
-              placeholder="Contoh: Setoran laci 4 hari / setor tunai ke BCA"
-            />
-          </div>
+          )}
         </div>
 
         <div className="border-t pt-4 mt-5 flex justify-end space-x-3">
@@ -908,7 +1095,8 @@ const DepositCashModal: React.FC<{
 const CashDrawerHistoryModal: React.FC<{
   logs: CashDrawerLog[];
   onClose: () => void;
-}> = ({ logs, onClose }) => {
+  onDeleteLog: (logId: string) => Promise<void>;
+}> = ({ logs, onClose, onDeleteLog }) => {
   const [filterType, setFilterType] = useState<'Semua' | 'Setor' | 'Penyesuaian Kas Awal'>('Semua');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -925,13 +1113,24 @@ const CashDrawerHistoryModal: React.FC<{
     };
   }, [filteredLogs]);
 
+  const handleDeleteClick = async (e: React.MouseEvent, log: CashDrawerLog) => {
+    e.stopPropagation();
+    const isLatest = logs[0]?.id === log.id;
+    const msg = isLatest
+      ? `Batalkan log terbaru (${log.type} - ${formatDateTime(log.timestamp)}) dan kembalikan posisi Kas Akhir (Laci) ke kondisi sebelumnya?`
+      : `Hapus catatan riwayat (${log.type} - ${formatDateTime(log.timestamp)}) ini?`;
+    if (window.confirm(msg)) {
+      await onDeleteLog(log.id);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center border-b pb-3 mb-4">
           <div>
             <h3 className="text-xl font-bold text-gray-800">Log Kas Laci & Riwayat Setoran</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Rekam jejak setor dana (ke owner / rekening bank) dan penyesuaian kas awal periode.</p>
+            <p className="text-xs text-gray-500 mt-0.5">Rekam jejak setor dana (titipan owner / bank / prive) dan penyesuaian kas awal periode.</p>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
         </div>
@@ -979,11 +1178,15 @@ const CashDrawerHistoryModal: React.FC<{
                   <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600">Disetor</th>
                   <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600">Sisa Laci</th>
                   <th className="py-2.5 px-3 text-left text-xs font-semibold text-gray-600">Selisih / Penerima</th>
+                  <th className="py-2.5 px-3 text-center text-xs font-semibold text-gray-600">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {filteredLogs.map(log => {
                   const isExpanded = expandedId === log.id;
+                  const isLatest = logs[0]?.id === log.id;
+                  const isOwnerHold = log.depositMode === 'owner_hold' || log.depositToAccountId === OWNER_HOLD_ACCOUNT_ID;
+                  const isBank = (log.depositMode === 'bank_account') || (!isOwnerHold && !!log.depositToAccountId);
                   return (
                     <React.Fragment key={log.id}>
                       <tr
@@ -1021,9 +1224,17 @@ const CashDrawerHistoryModal: React.FC<{
                             <>
                               <div className="font-medium text-gray-700">
                                 Ke: {log.recipient || 'Owner'}
-                                {log.depositToAccountName && (
+                                {isOwnerHold ? (
+                                  <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-semibold">
+                                    Titipan Owner (Uang Toko)
+                                  </span>
+                                ) : isBank && log.depositToAccountName ? (
                                   <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-semibold">
                                     → {log.depositToAccountName}
+                                  </span>
+                                ) : (
+                                  <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-semibold">
+                                    Prive / Keluar Usaha
                                   </span>
                                 )}
                               </div>
@@ -1039,10 +1250,20 @@ const CashDrawerHistoryModal: React.FC<{
                             <span className="text-gray-600">{log.notes || 'Penyesuaian kas awal'}</span>
                           )}
                         </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteClick(e, log)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                            title={isLatest ? 'Batalkan Log Terbaru & Pulihkan Laci' : 'Hapus Catatan Log'}
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                          </button>
+                        </td>
                       </tr>
                       {isExpanded && (
                         <tr className="bg-gray-50">
-                          <td colSpan={6} className="px-4 py-3 text-xs text-gray-700 space-y-2">
+                          <td colSpan={7} className="px-4 py-3 text-xs text-gray-700 space-y-2">
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                               <div>Kas Awal: <strong>{formatCurrency(log.openingCash)}</strong></div>
                               <div>Tunai Masuk: <strong className="text-emerald-700">+{formatCurrency(log.cashInTotal)}</strong></div>
@@ -1412,11 +1633,22 @@ interface ReceivablesProps {
   currentUserName?: string;
   paymentMethods: PaymentMethod[];
   onUpdateInitialCash: (amount: number) => void;
-  onUpdateCashDrawerInitial: (amount: number, periodStartDate?: string, notes?: string) => Promise<void>;
+  onUpdateCashDrawerInitial: (
+    amount: number,
+    periodStartDate?: string,
+    notes?: string,
+    settledOverride?: {
+      rawCashInToday: number;
+      rawCashOutToday: number;
+      rawTransferInToday: number;
+      rawTransferOutToday: number;
+    }
+  ) => Promise<void>;
   onSetorCash: (payload: {
     depositAmount: number;
     physicalCash?: number;
     recipient: string;
+    depositMode?: 'owner_hold' | 'bank_account' | 'owner_prive';
     depositToAccountId?: string;
     depositToAccountName?: string;
     notes?: string;
@@ -1435,6 +1667,7 @@ interface ReceivablesProps {
       breakdownByMethod: Record<string, number>;
     };
   }) => Promise<void>;
+  onDeleteCashDrawerLog: (logId: string) => Promise<void>;
   onProcessPayment: (orderId: string, paymentDetails: Payment, newDiscount?: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onPayUnprocessedOrder: (orderId: string, paymentDetails: Payment, newDiscount: number, updatedItems?: OrderItemData[], newTotalAmount?: number) => void;
   onBulkProcessPayment: (orderIds: string[], paymentDate: string, paymentMethodId: string) => void;
@@ -1456,7 +1689,7 @@ const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> =
 
 const Receivables: React.FC<ReceivablesProps> = ({ 
     receivables, unprocessedOrders, allOrders, boardData, products, finishings, customers, categories, expenses, expenseMetadata = {}, supplierBills = [], bankInstallments = [], privateExpenses = [], initialCash, cashDrawerState, cashDrawerLogs, cashTransfers = [], currentUserName, paymentMethods,
-    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateCashDrawerInitial, onSetorCash, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings,
+    onProcessPayment, onPayUnprocessedOrder, onBulkProcessPayment, onUpdateInitialCash, onUpdateCashDrawerInitial, onSetorCash, onDeleteCashDrawerLog, onUpdateDueDate, onBulkUpdateDueDate, notificationSettings,
     legacyReceivables, onPayLegacyReceivable
 }) => {
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
@@ -3397,10 +3630,19 @@ const Receivables: React.FC<ReceivablesProps> = ({
         <InitialCashModal
             currentAmount={effectiveOpeningCash}
             currentStartDate={periodStartDate}
+            today={today}
+            expectedCash={finalCash}
+            periodNetChange={cashDrawerMetrics.cashInPeriod - cashDrawerMetrics.cashOutPeriod + cashDrawerMetrics.cashTransferNetPeriod}
+            rawTodayMetrics={{
+              rawCashInToday: cashDrawerMetrics.rawCashInToday,
+              rawCashOutToday: cashDrawerMetrics.rawCashOutToday,
+              rawTransferInToday: cashDrawerMetrics.rawTransferInToday,
+              rawTransferOutToday: cashDrawerMetrics.rawTransferOutToday,
+            }}
             onClose={() => setInitialCashModalOpen(false)}
-            onSave={(amount, startDate, notes) => {
+            onSave={(amount, startDate, notes, settledOverride) => {
               onUpdateInitialCash(amount);
-              onUpdateCashDrawerInitial(amount, startDate, notes);
+              onUpdateCashDrawerInitial(amount, startDate, notes, settledOverride);
             }}
         />
     )}
@@ -3419,11 +3661,12 @@ const Receivables: React.FC<ReceivablesProps> = ({
             nonCashAccounts={nonCashAccounts}
             currentUserName={currentUserName}
             onClose={() => setSetorModalOpen(false)}
-            onConfirmSetor={async ({ depositAmount, physicalCash, recipient, depositToAccountId, depositToAccountName, notes }) => {
+            onConfirmSetor={async ({ depositAmount, physicalCash, recipient, depositMode, depositToAccountId, depositToAccountName, notes }) => {
               await onSetorCash({
                 depositAmount,
                 physicalCash,
                 recipient,
+                depositMode,
                 depositToAccountId,
                 depositToAccountName,
                 notes,
@@ -3449,6 +3692,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         <CashDrawerHistoryModal
             logs={cashDrawerLogs}
             onClose={() => setHistoryModalOpen(false)}
+            onDeleteLog={onDeleteCashDrawerLog}
         />
     )}
     {summaryModal.type && (

@@ -17,7 +17,13 @@ import {
     ArrowPathIcon,
 } from './Icons';
 import { exportToExcel } from './reportUtils';
-import { calculateGlobalFinancialRecap, getUtcDateStr, getUtcMonthDateRange } from './cashFlowUtils';
+import {
+    calculateGlobalFinancialRecap,
+    getUtcDateStr,
+    getUtcMonthDateRange,
+    OWNER_HOLD_ACCOUNT_ID,
+    OWNER_HOLD_ACCOUNT_NAME,
+} from './cashFlowUtils';
 import Pagination from './Pagination';
 
 const ITEMS_PER_PAGE = 20;
@@ -79,11 +85,11 @@ const CashTransferModal: React.FC<{
 
     if (!show) return null;
 
-    const applyPreset = (preset: 'qrisToBank' | 'bankToBank' | 'bankToCash' | 'cashToBank') => {
+    const applyPreset = (preset: 'qrisToBank' | 'bankToBank' | 'bankToCash' | 'cashToBank' | 'ownerHoldToBank' | 'ownerHoldToCash') => {
         setTransferType('Pindah Akun');
         const qrisAcc = paymentMethods.find(m => m.type === 'QRIS');
         const bankAccs = paymentMethods.filter(m => m.type === 'Transfer Bank');
-        const cashAcc = paymentMethods.find(m => m.type === 'Tunai');
+        const cashAcc = paymentMethods.find(m => m.type === 'Tunai' && m.id !== OWNER_HOLD_ACCOUNT_ID);
         if (preset === 'qrisToBank') {
             if (qrisAcc) setFromAccountId(qrisAcc.id);
             if (bankAccs[0]) setToAccountId(bankAccs[0].id);
@@ -100,6 +106,14 @@ const CashTransferModal: React.FC<{
             if (cashAcc) setFromAccountId(cashAcc.id);
             if (bankAccs[0]) setToAccountId(bankAccs[0].id);
             setNotes('Setor uang tunai laci ke bank');
+        } else if (preset === 'ownerHoldToBank') {
+            setFromAccountId(OWNER_HOLD_ACCOUNT_ID);
+            if (bankAccs[0]) setToAccountId(bankAccs[0].id);
+            setNotes('Setor kas titipan di owner ke rekening bank toko');
+        } else if (preset === 'ownerHoldToCash') {
+            setFromAccountId(OWNER_HOLD_ACCOUNT_ID);
+            if (cashAcc) setToAccountId(cashAcc.id);
+            setNotes('Kembalikan kas titipan owner ke laci kasir');
         }
     };
 
@@ -168,6 +182,8 @@ const CashTransferModal: React.FC<{
                 <div className="mb-4">
                     <p className="text-xs font-semibold text-gray-500 uppercase mb-1.5">Template Cepat:</p>
                     <div className="flex flex-wrap gap-1.5">
+                        <button type="button" onClick={() => applyPreset('ownerHoldToBank')} className="px-2.5 py-1 text-xs rounded-md bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 font-medium">Titipan Owner → Bank</button>
+                        <button type="button" onClick={() => applyPreset('ownerHoldToCash')} className="px-2.5 py-1 text-xs rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 hover:bg-fuchsia-100 font-medium">Titipan Owner → Laci</button>
                         <button type="button" onClick={() => applyPreset('qrisToBank')} className="px-2.5 py-1 text-xs rounded-md bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-medium">Cairkan QRIS → Bank</button>
                         <button type="button" onClick={() => applyPreset('bankToBank')} className="px-2.5 py-1 text-xs rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-medium">Bank → Bank Lain</button>
                         <button type="button" onClick={() => applyPreset('cashToBank')} className="px-2.5 py-1 text-xs rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-medium">Setor Tunai → Bank</button>
@@ -198,7 +214,7 @@ const CashTransferModal: React.FC<{
                                 <select value={fromAccountId} onChange={e => setFromAccountId(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white" required>
                                     <option value="">-- Pilih Akun Asal --</option>
                                     {paymentMethods.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name} ({m.type})</option>
+                                        <option key={m.id} value={m.id}>{m.name} ({m.id === OWNER_HOLD_ACCOUNT_ID ? 'Titipan Owner' : m.type})</option>
                                     ))}
                                 </select>
                             </div>
@@ -209,7 +225,7 @@ const CashTransferModal: React.FC<{
                                 <select value={toAccountId} onChange={e => setToAccountId(e.target.value)} className="w-full p-2 border rounded-lg text-sm bg-white" required>
                                     <option value="">-- Pilih Akun Tujuan --</option>
                                     {paymentMethods.map(m => (
-                                        <option key={m.id} value={m.id}>{m.name} ({m.type})</option>
+                                        <option key={m.id} value={m.id}>{m.name} ({m.id === OWNER_HOLD_ACCOUNT_ID ? 'Titipan Owner' : m.type})</option>
                                     ))}
                                 </select>
                             </div>
@@ -283,7 +299,7 @@ const AccountReconcileModal: React.FC<{
 
     if (!account) return null;
 
-    const isCash = account.type === 'Tunai';
+    const isCash = account.type === 'Tunai' && account.id !== OWNER_HOLD_ACCOUNT_ID;
     const hasRealInput = realBalance.trim() !== '';
     const numReal = hasRealInput ? Number(realBalance) : 0;
     const numOpening = Number(openingBalance) || 0;
@@ -342,7 +358,7 @@ const AccountReconcileModal: React.FC<{
                 <div className="flex justify-between items-center border-b pb-3 mb-4">
                     <div>
                         <h3 className="text-lg font-bold text-gray-800">Cek Saldo Real &amp; Saldo Awal</h3>
-                        <p className="text-xs text-gray-500">{account.name} ({account.type})</p>
+                        <p className="text-xs text-gray-500">{account.name} ({account.id === OWNER_HOLD_ACCOUNT_ID ? 'Titipan Owner' : account.type})</p>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
                 </div>
@@ -456,7 +472,7 @@ const AccountReconcileModal: React.FC<{
     );
 };
 
-type CashFlowWallet = 'Kas Laci' | 'Bank / Non-Tunai' | 'Uang Pribadi Owner' | 'Data Lama';
+type CashFlowWallet = 'Kas Laci' | 'Bank / Non-Tunai' | 'Kas Dipegang Owner' | 'Uang Pribadi Owner' | 'Data Lama';
 type CashFlowActivity = 'Operasional' | 'Kewajiban' | 'Owner' | 'Mutasi';
 
 interface CashFlowEntry {
@@ -479,6 +495,13 @@ interface CashFlowEntry {
     isSetor?: boolean;
     note?: string;
 }
+
+const OWNER_HOLD_DESCRIPTOR: PaymentMethod = {
+    id: OWNER_HOLD_ACCOUNT_ID,
+    name: 'Kas Dipegang Owner',
+    type: 'E-Wallet',
+    details: 'Titipan kas toko yang dibawa/disimpan sementara oleh owner',
+};
 
 const CashFlow: React.FC<CashFlowProps> = ({
     receivables,
@@ -514,6 +537,11 @@ const CashFlow: React.FC<CashFlowProps> = ({
             ? paymentMethods
             : [{ id: 'cash-default', name: 'Tunai', type: 'Tunai', details: 'Pembayaran tunai di kasir' }];
     }, [paymentMethods]);
+
+    const allTrackedAccounts = useMemo<PaymentMethod[]>(
+        () => [...effectivePaymentMethods, OWNER_HOLD_DESCRIPTOR],
+        [effectivePaymentMethods]
+    );
 
     const cashMethodIds = useMemo(
         () => new Set(effectivePaymentMethods.filter(m => m.type === 'Tunai').map(m => m.id)),
@@ -672,7 +700,16 @@ const CashFlow: React.FC<CashFlowProps> = ({
             const eDate = e.date || getUtcDateStr();
             const meta = expenseMetadata[e.id];
             const funding = meta?.fundingSource || 'Kas Laci';
-            const accId = funding === 'Kas Laci' ? primaryCashMethod?.id : meta?.fundingAccountId;
+            const accId = funding === 'Kas Laci'
+                ? primaryCashMethod?.id
+                : funding === 'Kas Dipegang Owner'
+                    ? OWNER_HOLD_ACCOUNT_ID
+                    : meta?.fundingAccountId;
+            const wallet: CashFlowWallet = funding === 'Kas Laci'
+                ? 'Kas Laci'
+                : funding === 'Kas Dipegang Owner'
+                    ? 'Kas Dipegang Owner'
+                    : 'Bank / Non-Tunai';
             list.push({
                 id: `exp-${e.id}`,
                 date: eDate,
@@ -682,7 +719,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                 category: meta?.purchaseId ? 'Pembelian Bahan (Lunas)' : e.category,
                 description: e.name,
                 methodOrSource: meta?.fundingAccountName ? `${funding} • ${meta.fundingAccountName}` : funding,
-                wallet: funding === 'Kas Laci' ? 'Kas Laci' : 'Bank / Non-Tunai',
+                wallet,
                 amount: e.amount,
                 accountId: accId,
                 note: meta?.notes,
@@ -697,9 +734,18 @@ const CashFlow: React.FC<CashFlowProps> = ({
                 const isOwner = p.fundingSource === 'Dana Owner';
                 const accId = p.fundingSource === 'Kas Laci'
                     ? primaryCashMethod?.id
-                    : p.fundingSource === 'Transfer Bank'
-                        ? p.fundingAccountId
-                        : undefined;
+                    : p.fundingSource === 'Kas Dipegang Owner'
+                        ? OWNER_HOLD_ACCOUNT_ID
+                        : p.fundingSource === 'Transfer Bank'
+                            ? p.fundingAccountId
+                            : undefined;
+                const wallet: CashFlowWallet = p.fundingSource === 'Kas Laci'
+                    ? 'Kas Laci'
+                    : p.fundingSource === 'Kas Dipegang Owner'
+                        ? 'Kas Dipegang Owner'
+                        : p.fundingSource === 'Transfer Bank'
+                            ? 'Bank / Non-Tunai'
+                            : 'Uang Pribadi Owner';
                 list.push({
                     id: `sup-${bill.id}-${idx}`,
                     date: pDate,
@@ -709,7 +755,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     category: 'Tagihan Pemasok',
                     description: `${bill.supplierName} (${bill.invoiceNumber})`,
                     methodOrSource: p.fundingAccountName ? `${p.fundingSource} • ${p.fundingAccountName}` : p.fundingSource,
-                    wallet: p.fundingSource === 'Kas Laci' ? 'Kas Laci' : p.fundingSource === 'Transfer Bank' ? 'Bank / Non-Tunai' : 'Uang Pribadi Owner',
+                    wallet,
                     amount: p.amount,
                     accountId: accId,
                     note: p.notes,
@@ -725,9 +771,18 @@ const CashFlow: React.FC<CashFlowProps> = ({
                 const isOwner = p.fundingSource === 'Dana Owner';
                 const accId = p.fundingSource === 'Kas Laci'
                     ? primaryCashMethod?.id
-                    : p.fundingSource === 'Transfer Bank'
-                        ? p.fundingAccountId
-                        : undefined;
+                    : p.fundingSource === 'Kas Dipegang Owner'
+                        ? OWNER_HOLD_ACCOUNT_ID
+                        : p.fundingSource === 'Transfer Bank'
+                            ? p.fundingAccountId
+                            : undefined;
+                const wallet: CashFlowWallet = p.fundingSource === 'Kas Laci'
+                    ? 'Kas Laci'
+                    : p.fundingSource === 'Kas Dipegang Owner'
+                        ? 'Kas Dipegang Owner'
+                        : p.fundingSource === 'Transfer Bank'
+                            ? 'Bank / Non-Tunai'
+                            : 'Uang Pribadi Owner';
                 list.push({
                     id: `bank-${inst.id}-${idx}`,
                     date: pDate,
@@ -737,7 +792,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     category: 'Cicilan Bank',
                     description: `${inst.name} (Pokok ${formatCurrency(p.principalPaid)}${p.interestPaid > 0 ? ` + Bunga ${formatCurrency(p.interestPaid)}` : ''})`,
                     methodOrSource: p.fundingAccountName ? `${p.fundingSource} • ${p.fundingAccountName}` : p.fundingSource,
-                    wallet: p.fundingSource === 'Kas Laci' ? 'Kas Laci' : p.fundingSource === 'Transfer Bank' ? 'Bank / Non-Tunai' : 'Uang Pribadi Owner',
+                    wallet,
                     amount: p.totalPaid,
                     accountId: accId,
                     note: p.notes,
@@ -755,9 +810,18 @@ const CashFlow: React.FC<CashFlowProps> = ({
                 : undefined;
             const accId = pe.fundingSource === 'Kas Laci'
                 ? primaryCashMethod?.id
-                : pe.fundingSource === 'Transfer Bank'
-                    ? pe.fundingAccountId
-                    : undefined;
+                : pe.fundingSource === 'Kas Dipegang Owner'
+                    ? OWNER_HOLD_ACCOUNT_ID
+                    : pe.fundingSource === 'Transfer Bank'
+                        ? pe.fundingAccountId
+                        : undefined;
+            const wallet: CashFlowWallet = pe.fundingSource === 'Kas Laci'
+                ? 'Kas Laci'
+                : pe.fundingSource === 'Kas Dipegang Owner'
+                    ? 'Kas Dipegang Owner'
+                    : pe.fundingSource === 'Transfer Bank'
+                        ? 'Bank / Non-Tunai'
+                        : 'Uang Pribadi Owner';
             list.push({
                 id: `priv-${pe.id}`,
                 date: peDate,
@@ -767,32 +831,42 @@ const CashFlow: React.FC<CashFlowProps> = ({
                 category: pe.category || 'Pengeluaran Pribadi / Lain-lain',
                 description: `${pe.name}${pe.guestOrEvent ? ` • ${pe.guestOrEvent}` : ''}`,
                 methodOrSource: pe.fundingAccountName ? `${pe.fundingSource} • ${pe.fundingAccountName}` : pe.fundingSource,
-                wallet: pe.fundingSource === 'Kas Laci' ? 'Kas Laci' : pe.fundingSource === 'Transfer Bank' ? 'Bank / Non-Tunai' : 'Uang Pribadi Owner',
+                wallet,
                 amount: pe.amount,
                 accountId: accId,
                 note: [reimburseInfo, pe.notes].filter(Boolean).join(' — ') || undefined,
             });
         });
 
-        // 6. Setoran Kas Laci (ke Owner atau Rekening Bank Toko)
+        // 6. Setoran Kas Laci (Titipan Owner / Rekening Bank Toko / Prive Permanen)
         cashDrawerLogs.forEach(log => {
             if (log.type !== 'Setor' || !log.depositAmount) return;
             const logDate = log.timestamp ? getUtcDateStr(new Date(log.timestamp)) : log.periodEndDate;
-            const isToBank = !!log.depositToAccountId;
+            const isOwnerHold = log.depositMode === 'owner_hold' || log.depositToAccountId === OWNER_HOLD_ACCOUNT_ID;
+            const isToBank = log.depositMode === 'bank_account' || (!isOwnerHold && !!log.depositToAccountId);
+            const isInternal = isOwnerHold || isToBank;
             list.push({
                 id: `setor-${log.id}`,
                 date: logDate,
                 sortKey: `${logDate}-6-${log.timestamp || log.id}`,
-                type: isToBank ? 'Mutasi' : 'Keluar',
+                type: isInternal ? 'Mutasi' : 'Keluar',
                 activity: 'Owner',
-                category: isToBank ? 'Setor Kas Laci ke Rekening' : 'Setor Kas ke Owner',
-                description: `Setor ke ${log.recipient || 'Owner'}${log.depositToAccountName ? ` (${log.depositToAccountName})` : ''}${log.operator ? ` • Op: ${log.operator}` : ''}`,
-                methodOrSource: isToBank ? `Kas Laci → ${log.depositToAccountName || 'Bank'}` : 'Kas Laci → Owner',
+                category: isOwnerHold
+                    ? 'Setor Titipan ke Owner (Kas Toko)'
+                    : isToBank
+                        ? 'Setor Kas Laci ke Rekening'
+                        : 'Setor / Prive Owner (Keluar Usaha)',
+                description: `Setor ke ${log.recipient || 'Owner'}${isOwnerHold ? ' (Titipan Kas Toko)' : log.depositToAccountName ? ` (${log.depositToAccountName})` : ' (Prive Permanen)'}${log.operator ? ` • Op: ${log.operator}` : ''}`,
+                methodOrSource: isOwnerHold
+                    ? 'Kas Laci → Kas Dipegang Owner'
+                    : isToBank
+                        ? `Kas Laci → ${log.depositToAccountName || 'Bank'}`
+                        : 'Kas Laci → Owner (Prive)',
                 wallet: 'Kas Laci',
                 amount: log.depositAmount,
                 netAmount: log.depositAmount,
                 fromAccountId: primaryCashMethod?.id,
-                toAccountId: log.depositToAccountId,
+                toAccountId: isOwnerHold ? OWNER_HOLD_ACCOUNT_ID : (isToBank ? log.depositToAccountId : undefined),
                 isSetor: true,
                 note: log.notes || `Periode laci ${formatDate(log.periodStartDate)} – ${formatDate(log.periodEndDate)}`,
             });
@@ -804,6 +878,8 @@ const CashFlow: React.FC<CashFlowProps> = ({
             const tDate = t.date || getUtcDateStr();
             const fromIsCash = !!t.fromAccountId && cashMethodIds.has(t.fromAccountId);
             const toIsCash = !!t.toAccountId && cashMethodIds.has(t.toAccountId);
+            const fromIsOwnerHold = t.fromAccountId === OWNER_HOLD_ACCOUNT_ID;
+            const toIsOwnerHold = t.toAccountId === OWNER_HOLD_ACCOUNT_ID;
             if (t.transferType === 'Pindah Akun') {
                 list.push({
                     id: `trf-${t.id}`,
@@ -815,7 +891,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     category: 'Pindah Dana Antar Akun',
                     description: `${t.fromAccountName || '-'} → ${t.toAccountName || '-'}${t.adminFee ? ` (Potongan MDR/Admin ${formatCurrency(t.adminFee)})` : ''}`,
                     methodOrSource: `${t.fromAccountName || '-'} → ${t.toAccountName || '-'}`,
-                    wallet: fromIsCash ? 'Kas Laci' : 'Bank / Non-Tunai',
+                    wallet: fromIsCash ? 'Kas Laci' : fromIsOwnerHold ? 'Kas Dipegang Owner' : 'Bank / Non-Tunai',
                     amount: t.amount,
                     adminFee: t.adminFee,
                     netAmount: t.netAmount,
@@ -834,7 +910,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     category: 'Suntik Modal / Tambah Saldo',
                     description: `Tambah Saldo ke ${t.toAccountName || 'Kas'}`,
                     methodOrSource: `Owner → ${t.toAccountName || 'Kas'}`,
-                    wallet: toIsCash ? 'Kas Laci' : 'Bank / Non-Tunai',
+                    wallet: toIsCash ? 'Kas Laci' : toIsOwnerHold ? 'Kas Dipegang Owner' : 'Bank / Non-Tunai',
                     amount: t.netAmount ?? t.amount,
                     accountId: t.toAccountId,
                     note: t.notes,
@@ -850,7 +926,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     category: 'Tarik Dana Owner (Prive)',
                     description: `Penarikan Dana dari ${t.fromAccountName || 'Kas'}`,
                     methodOrSource: `${t.fromAccountName || 'Kas'} → Owner`,
-                    wallet: fromIsCash ? 'Kas Laci' : 'Bank / Non-Tunai',
+                    wallet: fromIsCash ? 'Kas Laci' : fromIsOwnerHold ? 'Kas Dipegang Owner' : 'Bank / Non-Tunai',
                     amount: t.amount,
                     accountId: t.fromAccountId,
                     note: t.notes,
@@ -890,9 +966,11 @@ const CashFlow: React.FC<CashFlowProps> = ({
         let inDataLama = 0;
         let outLaciBelanja = 0;
         let outBankBelanja = 0;
+        let outOwnerHoldBelanja = 0;
         let outDataLama = 0;
         let totalSetorOwner = 0;
         let totalSetorBank = 0;
+        let totalSetorOwnerHold = 0;
         let ownerAdvancePeriod = 0;
         let transferInLaci = 0;
         let transferOutLaci = 0;
@@ -912,22 +990,29 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     outLaciBelanja += e.amount;
                 } else if (e.wallet === 'Bank / Non-Tunai') {
                     outBankBelanja += e.amount;
+                } else if (e.wallet === 'Kas Dipegang Owner') {
+                    outOwnerHoldBelanja += e.amount;
                 } else if (e.wallet === 'Data Lama') {
                     outDataLama += e.amount;
                 }
             } else if (e.type === 'Mutasi') {
-                if (e.isSetor) totalSetorBank += e.amount;
+                if (e.isSetor) {
+                    if (e.toAccountId === OWNER_HOLD_ACCOUNT_ID) totalSetorOwnerHold += e.amount;
+                    else totalSetorBank += e.amount;
+                }
                 transferAdminFeePeriod += e.adminFee || 0;
                 const fromIsCash = !!e.fromAccountId && cashMethodIds.has(e.fromAccountId);
                 const toIsCash = !!e.toAccountId && cashMethodIds.has(e.toAccountId);
+                const fromIsOwnerHold = e.fromAccountId === OWNER_HOLD_ACCOUNT_ID;
+                const toIsOwnerHold = e.toAccountId === OWNER_HOLD_ACCOUNT_ID;
                 const incoming = e.netAmount ?? e.amount;
                 if (e.fromAccountId) {
                     if (fromIsCash) transferOutLaci += e.amount;
-                    else transferOutBank += e.amount;
+                    else if (!fromIsOwnerHold) transferOutBank += e.amount;
                 }
                 if (e.toAccountId) {
                     if (toIsCash) transferInLaci += incoming;
-                    else transferInBank += incoming;
+                    else if (!toIsOwnerHold) transferInBank += incoming;
                 }
             } else if (e.type === 'Talangan Owner') {
                 ownerAdvancePeriod += e.amount;
@@ -935,7 +1020,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
         });
 
         const totalIn = inLaci + inBank + inDataLama;
-        const totalOutBelanja = outLaciBelanja + outBankBelanja + outDataLama + transferAdminFeePeriod;
+        const totalOutBelanja = outLaciBelanja + outBankBelanja + outOwnerHoldBelanja + outDataLama + transferAdminFeePeriod;
         const netBusinessCashFlow = totalIn - totalOutBelanja;
         const netLaciPeriod = inLaci - outLaciBelanja - totalSetorOwner + transferInLaci - transferOutLaci;
         const netBankPeriod = inBank - outBankBelanja + transferInBank - transferOutBank;
@@ -951,11 +1036,13 @@ const CashFlow: React.FC<CashFlowProps> = ({
             totalIn,
             outLaciBelanja,
             outBankBelanja,
+            outOwnerHoldBelanja,
             outDataLama,
             transferAdminFeePeriod,
             totalOutBelanja,
             totalSetorOwner,
             totalSetorBank,
+            totalSetorOwnerHold,
             netBusinessCashFlow,
             netLaciPeriod,
             netBankPeriod,
@@ -1025,7 +1112,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
             discrepancy: number | null;
         }>();
 
-        effectivePaymentMethods.forEach(m => {
+        allTrackedAccounts.forEach(m => {
             statsMap.set(m.id, {
                 method: m,
                 meta: accountBalancesMeta[m.id],
@@ -1076,6 +1163,14 @@ const CashFlow: React.FC<CashFlowProps> = ({
             if (funding === 'Kas Laci') {
                 const cashStat = primaryCashMethod ? statsMap.get(primaryCashMethod.id) : undefined;
                 if (cashStat && isInPeriod(e.date)) cashStat.periodOut += e.amount;
+            } else if (funding === 'Kas Dipegang Owner') {
+                const holdStat = statsMap.get(OWNER_HOLD_ACCOUNT_ID);
+                if (holdStat) {
+                    if (e.date <= todayLocal && isAfterCutoff(OWNER_HOLD_ACCOUNT_ID, e.date)) {
+                        holdStat.systemBalance -= e.amount;
+                    }
+                    if (isInPeriod(e.date)) holdStat.periodOut += e.amount;
+                }
             } else if (funding === 'Transfer Bank') {
                 if (meta?.fundingAccountId && statsMap.has(meta.fundingAccountId)) {
                     const stat = statsMap.get(meta.fundingAccountId)!;
@@ -1092,10 +1187,18 @@ const CashFlow: React.FC<CashFlowProps> = ({
 
         supplierBills.forEach(bill => {
             bill.payments.forEach(p => {
-                if (!p.date || !p.amount || (p.fundingSource !== 'Kas Laci' && p.fundingSource !== 'Transfer Bank')) return;
+                if (!p.date || !p.amount || (p.fundingSource !== 'Kas Laci' && p.fundingSource !== 'Transfer Bank' && p.fundingSource !== 'Kas Dipegang Owner')) return;
                 if (p.fundingSource === 'Kas Laci') {
                     const cashStat = primaryCashMethod ? statsMap.get(primaryCashMethod.id) : undefined;
                     if (cashStat && isInPeriod(p.date)) cashStat.periodOut += p.amount;
+                } else if (p.fundingSource === 'Kas Dipegang Owner') {
+                    const holdStat = statsMap.get(OWNER_HOLD_ACCOUNT_ID);
+                    if (holdStat) {
+                        if (p.date <= todayLocal && isAfterCutoff(OWNER_HOLD_ACCOUNT_ID, p.date)) {
+                            holdStat.systemBalance -= p.amount;
+                        }
+                        if (isInPeriod(p.date)) holdStat.periodOut += p.amount;
+                    }
                 } else if (p.fundingSource === 'Transfer Bank') {
                     if (p.fundingAccountId && statsMap.has(p.fundingAccountId)) {
                         const stat = statsMap.get(p.fundingAccountId)!;
@@ -1113,10 +1216,18 @@ const CashFlow: React.FC<CashFlowProps> = ({
 
         bankInstallments.forEach(inst => {
             inst.payments.forEach(p => {
-                if (!p.date || !p.totalPaid || (p.fundingSource !== 'Kas Laci' && p.fundingSource !== 'Transfer Bank')) return;
+                if (!p.date || !p.totalPaid || (p.fundingSource !== 'Kas Laci' && p.fundingSource !== 'Transfer Bank' && p.fundingSource !== 'Kas Dipegang Owner')) return;
                 if (p.fundingSource === 'Kas Laci') {
                     const cashStat = primaryCashMethod ? statsMap.get(primaryCashMethod.id) : undefined;
                     if (cashStat && isInPeriod(p.date)) cashStat.periodOut += p.totalPaid;
+                } else if (p.fundingSource === 'Kas Dipegang Owner') {
+                    const holdStat = statsMap.get(OWNER_HOLD_ACCOUNT_ID);
+                    if (holdStat) {
+                        if (p.date <= todayLocal && isAfterCutoff(OWNER_HOLD_ACCOUNT_ID, p.date)) {
+                            holdStat.systemBalance -= p.totalPaid;
+                        }
+                        if (isInPeriod(p.date)) holdStat.periodOut += p.totalPaid;
+                    }
                 } else if (p.fundingSource === 'Transfer Bank') {
                     if (p.fundingAccountId && statsMap.has(p.fundingAccountId)) {
                         const stat = statsMap.get(p.fundingAccountId)!;
@@ -1137,6 +1248,14 @@ const CashFlow: React.FC<CashFlowProps> = ({
             if (pe.fundingSource === 'Kas Laci') {
                 const cashStat = primaryCashMethod ? statsMap.get(primaryCashMethod.id) : undefined;
                 if (cashStat && isInPeriod(pe.date)) cashStat.periodOut += pe.amount;
+            } else if (pe.fundingSource === 'Kas Dipegang Owner') {
+                const holdStat = statsMap.get(OWNER_HOLD_ACCOUNT_ID);
+                if (holdStat) {
+                    if (pe.date <= todayLocal && isAfterCutoff(OWNER_HOLD_ACCOUNT_ID, pe.date)) {
+                        holdStat.systemBalance -= pe.amount;
+                    }
+                    if (isInPeriod(pe.date)) holdStat.periodOut += pe.amount;
+                }
             } else if (pe.fundingSource === 'Transfer Bank') {
                 if (pe.fundingAccountId && statsMap.has(pe.fundingAccountId)) {
                     const stat = statsMap.get(pe.fundingAccountId)!;
@@ -1154,14 +1273,17 @@ const CashFlow: React.FC<CashFlowProps> = ({
         cashDrawerLogs.forEach(log => {
             if (log.type !== 'Setor' || !log.depositAmount) return;
             const logDate = log.timestamp ? getUtcDateStr(new Date(log.timestamp)) : log.periodEndDate;
+            const isOwnerHold = log.depositMode === 'owner_hold' || log.depositToAccountId === OWNER_HOLD_ACCOUNT_ID;
+            const isToBank = log.depositMode === 'bank_account' || (!isOwnerHold && !!log.depositToAccountId);
+            const destId = isOwnerHold ? OWNER_HOLD_ACCOUNT_ID : isToBank ? log.depositToAccountId : undefined;
             const cashStat = primaryCashMethod ? statsMap.get(primaryCashMethod.id) : undefined;
             if (cashStat && isInPeriod(logDate)) {
-                if (log.depositToAccountId) cashStat.periodTransferOut += log.depositAmount;
+                if (destId) cashStat.periodTransferOut += log.depositAmount;
                 else cashStat.periodOut += log.depositAmount;
             }
-            if (log.depositToAccountId && statsMap.has(log.depositToAccountId)) {
-                const dest = statsMap.get(log.depositToAccountId)!;
-                if (logDate <= todayLocal && isAfterCutoff(log.depositToAccountId, logDate)) {
+            if (destId && statsMap.has(destId)) {
+                const dest = statsMap.get(destId)!;
+                if (logDate <= todayLocal && isAfterCutoff(destId, logDate)) {
                     dest.systemBalance += log.depositAmount;
                 }
                 if (isInPeriod(logDate)) dest.periodTransferIn += log.depositAmount;
@@ -1211,7 +1333,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
             unallocatedBankOutflowsPeriod: unallocatedPeriod,
         };
     }, [
-        effectivePaymentMethods,
+        allTrackedAccounts,
         accountBalancesMeta,
         receivables,
         expenses,
@@ -1238,19 +1360,23 @@ const CashFlow: React.FC<CashFlowProps> = ({
         };
         let net = 0;
 
-        receivables.forEach(r => {
-            r.payments?.forEach(p => {
-                if (!p.amount || !inRange(p.date)) return;
-                if (matchPaymentMethodId(p.methodId, p.methodName) === methodId) {
-                    net += p.amount;
-                }
+        if (methodId !== OWNER_HOLD_ACCOUNT_ID) {
+            receivables.forEach(r => {
+                r.payments?.forEach(p => {
+                    if (!p.amount || !inRange(p.date)) return;
+                    if (matchPaymentMethodId(p.methodId, p.methodName) === methodId) {
+                        net += p.amount;
+                    }
+                });
             });
-        });
+        }
 
         expenses.forEach(e => {
             if (!e.amount || !inRange(e.date)) return;
             const meta = expenseMetadata[e.id];
-            if (meta?.fundingSource === 'Transfer Bank' && meta.fundingAccountId === methodId) {
+            if (methodId === OWNER_HOLD_ACCOUNT_ID) {
+                if (meta?.fundingSource === 'Kas Dipegang Owner') net -= e.amount;
+            } else if (meta?.fundingSource === 'Transfer Bank' && meta.fundingAccountId === methodId) {
                 net -= e.amount;
             }
         });
@@ -1258,7 +1384,9 @@ const CashFlow: React.FC<CashFlowProps> = ({
         supplierBills.forEach(bill => {
             bill.payments.forEach(p => {
                 if (!p.amount || !inRange(p.date)) return;
-                if (p.fundingSource === 'Transfer Bank' && p.fundingAccountId === methodId) {
+                if (methodId === OWNER_HOLD_ACCOUNT_ID) {
+                    if (p.fundingSource === 'Kas Dipegang Owner') net -= p.amount;
+                } else if (p.fundingSource === 'Transfer Bank' && p.fundingAccountId === methodId) {
                     net -= p.amount;
                 }
             });
@@ -1267,7 +1395,9 @@ const CashFlow: React.FC<CashFlowProps> = ({
         bankInstallments.forEach(inst => {
             inst.payments.forEach(p => {
                 if (!p.totalPaid || !inRange(p.date)) return;
-                if (p.fundingSource === 'Transfer Bank' && p.fundingAccountId === methodId) {
+                if (methodId === OWNER_HOLD_ACCOUNT_ID) {
+                    if (p.fundingSource === 'Kas Dipegang Owner') net -= p.totalPaid;
+                } else if (p.fundingSource === 'Transfer Bank' && p.fundingAccountId === methodId) {
                     net -= p.totalPaid;
                 }
             });
@@ -1275,13 +1405,19 @@ const CashFlow: React.FC<CashFlowProps> = ({
 
         privateExpenses.forEach(pe => {
             if (!pe.amount || !inRange(pe.date)) return;
-            if (pe.fundingSource === 'Transfer Bank' && pe.fundingAccountId === methodId) {
+            if (methodId === OWNER_HOLD_ACCOUNT_ID) {
+                if (pe.fundingSource === 'Kas Dipegang Owner') net -= pe.amount;
+            } else if (pe.fundingSource === 'Transfer Bank' && pe.fundingAccountId === methodId) {
                 net -= pe.amount;
             }
         });
 
         cashDrawerLogs.forEach(log => {
-            if (log.type !== 'Setor' || !log.depositAmount || log.depositToAccountId !== methodId) return;
+            if (log.type !== 'Setor' || !log.depositAmount) return;
+            const isOwnerHold = log.depositMode === 'owner_hold' || log.depositToAccountId === OWNER_HOLD_ACCOUNT_ID;
+            const isToBank = log.depositMode === 'bank_account' || (!isOwnerHold && !!log.depositToAccountId);
+            const destId = isOwnerHold ? OWNER_HOLD_ACCOUNT_ID : isToBank ? log.depositToAccountId : undefined;
+            if (destId !== methodId) return;
             const logDate = log.timestamp ? getUtcDateStr(new Date(log.timestamp)) : log.periodEndDate;
             if (inRange(logDate)) net += log.depositAmount;
         });
@@ -1334,10 +1470,27 @@ const CashFlow: React.FC<CashFlowProps> = ({
             return { inAmt: 0, outAmt: 0, netDelta: 0 };
         }
 
-        if (filter === 'Bank / Non-Tunai') {
+        if (filter === 'Kas Dipegang Owner') {
             if (entry.type === 'Mutasi') {
-                const fromIsBank = !!entry.fromAccountId && !cashMethodIds.has(entry.fromAccountId);
-                const toIsBank = !!entry.toAccountId && !cashMethodIds.has(entry.toAccountId);
+                const fromHold = entry.fromAccountId === OWNER_HOLD_ACCOUNT_ID;
+                const toHold = entry.toAccountId === OWNER_HOLD_ACCOUNT_ID;
+                if (fromHold && !toHold) return { inAmt: 0, outAmt: entry.amount, netDelta: -entry.amount };
+                if (toHold && !fromHold) {
+                    const inc = entry.netAmount ?? entry.amount;
+                    return { inAmt: inc, outAmt: 0, netDelta: inc };
+                }
+                return { inAmt: 0, outAmt: 0, netDelta: 0 };
+            }
+            if (entry.type === 'Masuk') return { inAmt: entry.amount, outAmt: 0, netDelta: entry.amount };
+            if (entry.type === 'Keluar') return { inAmt: 0, outAmt: entry.amount, netDelta: -entry.amount };
+            return { inAmt: 0, outAmt: 0, netDelta: 0 };
+        }
+
+        if (filter === 'Bank / Non-Tunai') {
+            const isBankAcc = (id?: string) => !!id && !cashMethodIds.has(id) && id !== OWNER_HOLD_ACCOUNT_ID;
+            if (entry.type === 'Mutasi') {
+                const fromIsBank = isBankAcc(entry.fromAccountId);
+                const toIsBank = isBankAcc(entry.toAccountId);
                 if (fromIsBank && !toIsBank) return { inAmt: 0, outAmt: entry.amount, netDelta: -entry.amount };
                 if (toIsBank && !fromIsBank) {
                     const inc = entry.netAmount ?? entry.amount;
@@ -1400,9 +1553,14 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     const fromIsCash = !!entry.fromAccountId && cashMethodIds.has(entry.fromAccountId);
                     const toIsCash = !!entry.toAccountId && cashMethodIds.has(entry.toAccountId);
                     if (entry.wallet !== 'Kas Laci' && !fromIsCash && !toIsCash) return false;
+                } else if (cashFlowWalletFilter === 'Kas Dipegang Owner') {
+                    const fromHold = entry.fromAccountId === OWNER_HOLD_ACCOUNT_ID;
+                    const toHold = entry.toAccountId === OWNER_HOLD_ACCOUNT_ID;
+                    if (entry.wallet !== 'Kas Dipegang Owner' && !fromHold && !toHold) return false;
                 } else if (cashFlowWalletFilter === 'Bank / Non-Tunai') {
-                    const fromIsBank = !!entry.fromAccountId && !cashMethodIds.has(entry.fromAccountId);
-                    const toIsBank = !!entry.toAccountId && !cashMethodIds.has(entry.toAccountId);
+                    const isBankAcc = (id?: string) => !!id && !cashMethodIds.has(id) && id !== OWNER_HOLD_ACCOUNT_ID;
+                    const fromIsBank = isBankAcc(entry.fromAccountId);
+                    const toIsBank = isBankAcc(entry.toAccountId);
                     if (entry.wallet !== 'Bank / Non-Tunai' && !fromIsBank && !toIsBank) return false;
                 } else if (entry.wallet !== cashFlowWalletFilter) {
                     return false;
@@ -1675,13 +1833,14 @@ const CashFlow: React.FC<CashFlowProps> = ({
                             <select value={cashFlowWalletFilter} onChange={e => setCashFlowWalletFilter(e.target.value)} className="mt-1 w-full p-2 border rounded-md text-sm bg-white">
                                 <option value="Semua">Semua Kantong &amp; Akun</option>
                                 <option value="Kas Laci">Kas Laci (Tunai)</option>
+                                <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                                 <option value="Bank / Non-Tunai">Semua Bank / Non-Tunai</option>
-                                <option value="Uang Pribadi Owner">Uang Pribadi Owner</option>
+                                <option value="Uang Pribadi Owner">Uang Pribadi Owner (Talangan)</option>
                                 <option value="Data Lama">Data Lama (Bulanan)</option>
-                                {effectivePaymentMethods.length > 0 && (
+                                {allTrackedAccounts.length > 0 && (
                                     <optgroup label="Per Akun Pembayaran">
-                                        {effectivePaymentMethods.map(m => (
-                                            <option key={m.id} value={`account:${m.id}`}>{m.name} ({m.type})</option>
+                                        {allTrackedAccounts.map(m => (
+                                            <option key={m.id} value={`account:${m.id}`}>{m.name} ({m.id === OWNER_HOLD_ACCOUNT_ID ? 'Titipan Owner' : m.type})</option>
                                         ))}
                                     </optgroup>
                                 )}
@@ -1764,15 +1923,18 @@ const CashFlow: React.FC<CashFlowProps> = ({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                         {accountBalancesSummary.map(item => {
+                            const isOwnerHoldCard = item.method.id === OWNER_HOLD_ACCOUNT_ID;
                             const isSelected = cashFlowWalletFilter === `account:${item.method.id}`;
                             const badgeClass =
-                                item.method.type === 'Tunai'
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : item.method.type === 'QRIS'
-                                        ? 'bg-purple-100 text-purple-800'
-                                        : item.method.type === 'E-Wallet'
-                                            ? 'bg-amber-100 text-amber-800'
-                                            : 'bg-sky-100 text-sky-800';
+                                isOwnerHoldCard
+                                    ? 'bg-fuchsia-100 text-fuchsia-800'
+                                    : item.method.type === 'Tunai'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : item.method.type === 'QRIS'
+                                            ? 'bg-purple-100 text-purple-800'
+                                            : item.method.type === 'E-Wallet'
+                                                ? 'bg-amber-100 text-amber-800'
+                                                : 'bg-sky-100 text-sky-800';
                             const hasChecked = item.meta?.lastRealBalance !== undefined;
                             return (
                                 <div
@@ -1781,7 +1943,9 @@ const CashFlow: React.FC<CashFlowProps> = ({
                                     className={`cursor-pointer rounded-xl border p-3.5 transition-all flex flex-col justify-between gap-2 ${
                                         isSelected
                                             ? 'border-pink-500 ring-2 ring-pink-200 bg-pink-50/30'
-                                            : 'border-gray-200 bg-white hover:border-pink-300 hover:shadow-sm'
+                                            : isOwnerHoldCard
+                                                ? 'border-fuchsia-200 bg-fuchsia-50/20 hover:border-fuchsia-400 hover:shadow-sm'
+                                                : 'border-gray-200 bg-white hover:border-pink-300 hover:shadow-sm'
                                     }`}
                                 >
                                     <div className="space-y-1.5">
@@ -1789,7 +1953,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                                             <div className="min-w-0">
                                                 <p className="font-bold text-gray-900 text-sm truncate" title={item.method.name}>{item.method.name}</p>
                                                 <span className={`inline-block mt-0.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${badgeClass}`}>
-                                                    {item.method.type}
+                                                    {isOwnerHoldCard ? 'Titipan Owner (Kas Toko)' : item.method.type}
                                                 </span>
                                             </div>
                                             {hasChecked ? (
@@ -1881,7 +2045,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                     />
                     <ProminentStatCard
                         icon={<ArrowUpTrayIcon />}
-                        title="Disetor ke Owner"
+                        title="Tarik Permanen Owner (Prive)"
                         value={formatCurrency(cashFlowSummary.totalSetorOwner)}
                         gradient="bg-gradient-to-br from-purple-500 to-fuchsia-600"
                     />
@@ -1896,7 +2060,10 @@ const CashFlow: React.FC<CashFlowProps> = ({
                         </div>
                         <div className="flex justify-between text-gray-700"><span>Masuk Tunai (Periode)</span><span className="font-semibold text-emerald-700">+ {formatCurrency(cashFlowSummary.inLaci)}</span></div>
                         <div className="flex justify-between text-gray-700"><span>Keluar Biaya/Cicilan Laci</span><span className="font-semibold text-rose-700">- {formatCurrency(cashFlowSummary.outLaciBelanja)}</span></div>
-                        <div className="flex justify-between text-gray-700"><span>Disetor ke Owner</span><span className="font-semibold text-purple-700">- {formatCurrency(cashFlowSummary.totalSetorOwner)}</span></div>
+                        {cashFlowSummary.totalSetorOwnerHold > 0 && (
+                            <div className="flex justify-between text-gray-700"><span>Setor Titipan Owner (Uang Toko)</span><span className="font-semibold text-fuchsia-700">- {formatCurrency(cashFlowSummary.totalSetorOwnerHold)}</span></div>
+                        )}
+                        <div className="flex justify-between text-gray-700"><span>Tarik Permanen Owner (Prive)</span><span className="font-semibold text-purple-700">- {formatCurrency(cashFlowSummary.totalSetorOwner)}</span></div>
                         {cashFlowSummary.transferNetLaci !== 0 && (
                             <div className="flex justify-between text-gray-700">
                                 <span>Mutasi Antar Akun (Net)</span>
@@ -1935,22 +2102,28 @@ const CashFlow: React.FC<CashFlowProps> = ({
                             <span>{formatCurrency(cashFlowSummary.netBankPeriod)}</span>
                         </div>
                         <p className="text-[11px] text-sky-700 pt-1">
-                            Gunakan tombol <strong>Mutasi / Pindah Dana</strong> di atas untuk mencatat pencairan QRIS ke Bank atau transfer antar rekening BRI ↔ BCA.
+                            Gunakan tombol <strong>Mutasi / Pindah Dana</strong> di atas untuk mencatat pencairan QRIS ke Bank, transfer antar rekening BRI ↔ BCA, atau pindah Titipan Owner ke Bank.
                         </p>
                     </div>
 
                     <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 space-y-2 text-sm">
                         <div className="flex items-center justify-between">
-                            <h4 className="font-bold text-amber-900">Kantong 3: Dana Pribadi Owner</h4>
-                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Terpisah dari Kas Toko</span>
+                            <h4 className="font-bold text-amber-900">Kantong 3: Posisi Dana di Owner</h4>
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Titipan vs Pribadi</span>
                         </div>
-                        <div className="flex justify-between text-gray-700"><span>Talangan / Dana Owner (Periode)</span><span className="font-semibold text-amber-800">{formatCurrency(cashFlowSummary.ownerAdvancePeriod)}</span></div>
+                        <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-lg px-2.5 py-1.5 flex justify-between items-center text-xs">
+                            <span className="text-fuchsia-900 font-semibold">Kas Dipegang Owner (Uang Toko)</span>
+                            <span className="font-bold text-fuchsia-800">
+                                {formatCurrency(accountBalancesSummary.find(a => a.method.id === OWNER_HOLD_ACCOUNT_ID)?.systemBalance || 0)}
+                            </span>
+                        </div>
+                        <div className="flex justify-between text-gray-700"><span>Talangan Uang Pribadi (Periode)</span><span className="font-semibold text-amber-800">{formatCurrency(cashFlowSummary.ownerAdvancePeriod)}</span></div>
                         <div className="border-t border-amber-200 pt-2 flex justify-between font-bold text-rose-700">
                             <span>Total Belum Reimburse (Global)</span>
                             <span>{formatCurrency(cashFlowSummary.unreimbursedOwnerTotal)}</span>
                         </div>
                         <p className="text-[11px] text-amber-800 pt-1">
-                            Pengeluaran pribadi/cicilan memakai Dana Owner dicatat terpisah agar saldo Kas Laci dan Rekening toko tetap murni.
+                            <b>Kas Dipegang Owner</b> masih dihitung sebagai kas toko (bisa dipindah ke Bank via Mutasi). <b>Uang Pribadi Owner</b> terpisah sebagai talangan pribadi.
                         </p>
                     </div>
                 </div>
@@ -1985,7 +2158,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
                             Buku Kas Gabungan ({cashFlowLedgerDesc.length} Transaksi)
                             {selectedAccountFilterId && (
                                 <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-pink-100 text-pink-700">
-                                    Filter Akun: {effectivePaymentMethods.find(m => m.id === selectedAccountFilterId)?.name}
+                                    Filter Akun: {allTrackedAccounts.find(m => m.id === selectedAccountFilterId)?.name}
                                 </span>
                             )}
                         </h4>
@@ -2052,9 +2225,11 @@ const CashFlow: React.FC<CashFlowProps> = ({
                                                     ? 'bg-emerald-100 text-emerald-800'
                                                     : row.wallet === 'Bank / Non-Tunai'
                                                         ? 'bg-sky-100 text-sky-800'
-                                                        : row.wallet === 'Data Lama'
-                                                            ? 'bg-slate-100 text-slate-700'
-                                                            : 'bg-amber-100 text-amber-800'
+                                                        : row.wallet === 'Kas Dipegang Owner'
+                                                            ? 'bg-fuchsia-100 text-fuchsia-800'
+                                                            : row.wallet === 'Data Lama'
+                                                                ? 'bg-slate-100 text-slate-700'
+                                                                : 'bg-amber-100 text-amber-800'
                                             }`}>
                                                 {row.wallet}
                                             </span>
@@ -2106,7 +2281,7 @@ const CashFlow: React.FC<CashFlowProps> = ({
             <CashTransferModal
                 show={isTransferModalOpen}
                 onClose={() => setIsTransferModalOpen(false)}
-                paymentMethods={effectivePaymentMethods}
+                paymentMethods={allTrackedAccounts}
                 onSave={onAddCashTransfer}
             />
 

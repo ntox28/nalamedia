@@ -700,7 +700,10 @@ export const buildOperationalExpensesHtml = (
   const kasLaciTotal = expenses
     .filter(e => (metadata[e.id]?.fundingSource || 'Kas Laci') === 'Kas Laci')
     .reduce((s, e) => s + e.amount, 0);
-  const bankTotal = total - kasLaciTotal;
+  const kasDipegangOwnerTotal = expenses
+    .filter(e => metadata[e.id]?.fundingSource === 'Kas Dipegang Owner')
+    .reduce((s, e) => s + e.amount, 0);
+  const bankTotal = total - kasLaciTotal - kasDipegangOwnerTotal;
 
   const rowsHtml =
     expenses.length > 0
@@ -740,6 +743,10 @@ export const buildOperationalExpensesHtml = (
         <div class="card-label">Sumber: Transfer Bank / Non-Laci</div>
         <div class="card-value">${escapeHtml(formatCurrencyIdr(bankTotal))}</div>
       </div>
+      ${kasDipegangOwnerTotal > 0 ? `<div class="card highlight-slate">
+        <div class="card-label">Sumber: Kas Dipegang Owner</div>
+        <div class="card-value">${escapeHtml(formatCurrencyIdr(kasDipegangOwnerTotal))}</div>
+      </div>` : ''}
     </div>
 
     <table>

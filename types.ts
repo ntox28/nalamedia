@@ -336,9 +336,9 @@ export interface NotificationItem {
 }
 
 // --- Tahap 2: Pembelian / Barang Masuk, Cicilan & Pemisahan Pengeluaran ---
-export type ExpenseFundingSource = 'Kas Laci' | 'Transfer Bank';
-export type InstallmentFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Dana Owner' | 'Sistem Lama (Sudah Tercatat)';
-export type PrivateFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Uang Pribadi Owner';
+export type ExpenseFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Kas Dipegang Owner';
+export type InstallmentFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Kas Dipegang Owner' | 'Dana Owner' | 'Sistem Lama (Sudah Tercatat)';
+export type PrivateFundingSource = 'Kas Laci' | 'Transfer Bank' | 'Kas Dipegang Owner' | 'Uang Pribadi Owner';
 
 export interface ExpenseMetadata {
   fundingSource: ExpenseFundingSource;
@@ -475,11 +475,13 @@ export interface CashDrawerLog {
   depositAmount: number;
   remainingCash: number;
   recipient?: string;
+  depositMode?: 'owner_hold' | 'bank_account' | 'owner_prive';
   depositToAccountId?: string;
   depositToAccountName?: string;
   operator?: string;
   notes?: string;
   breakdownByMethod?: Record<string, number>;
+  previousState?: CashDrawerState;
 }
 
 // --- Mutasi Antar Akun & Rekonsiliasi Saldo Sistem vs Real ---

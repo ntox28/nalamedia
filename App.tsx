@@ -839,17 +839,36 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleUpdateCashDrawerInitial = useCallback(async (amount: number, periodStartDate?: string, notes?: string) => {
+  const handleUpdateCashDrawerInitial = useCallback(async (
+    amount: number,
+    periodStartDate?: string,
+    notes?: string,
+    settledOverride?: {
+      rawCashInToday: number;
+      rawCashOutToday: number;
+      rawTransferInToday: number;
+      rawTransferOutToday: number;
+    }
+  ) => {
     const startDate = periodStartDate || cashDrawerState.periodStartDate || getLocalToday();
     const isStartDateChanged = startDate !== cashDrawerState.periodStartDate;
+    const prevSnapshot: CashDrawerState = { ...cashDrawerState };
     const nextState: CashDrawerState = {
       periodStartDate: startDate,
       periodStartAt: new Date().toISOString(),
       openingCash: amount,
-      settledCashInOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashInOnStartDate || 0),
-      settledCashOutOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashOutOnStartDate || 0),
-      settledCashTransferInOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashTransferInOnStartDate || 0),
-      settledCashTransferOutOnStartDate: isStartDateChanged ? 0 : (cashDrawerState.settledCashTransferOutOnStartDate || 0),
+      settledCashInOnStartDate: settledOverride
+        ? settledOverride.rawCashInToday
+        : isStartDateChanged ? 0 : (cashDrawerState.settledCashInOnStartDate || 0),
+      settledCashOutOnStartDate: settledOverride
+        ? settledOverride.rawCashOutToday
+        : isStartDateChanged ? 0 : (cashDrawerState.settledCashOutOnStartDate || 0),
+      settledCashTransferInOnStartDate: settledOverride
+        ? settledOverride.rawTransferInToday
+        : isStartDateChanged ? 0 : (cashDrawerState.settledCashTransferInOnStartDate || 0),
+      settledCashTransferOutOnStartDate: settledOverride
+        ? settledOverride.rawTransferOutToday
+        : isStartDateChanged ? 0 : (cashDrawerState.settledCashTransferOutOnStartDate || 0),
     };
 
     const newLog: CashDrawerLog = {
@@ -866,7 +885,12 @@ const App: React.FC = () => {
       depositAmount: 0,
       remainingCash: amount,
       operator: profile?.name,
-      notes: notes || (isStartDateChanged ? `Atur kas awal & mulai hitung sejak ${startDate}` : 'Penyesuaian kas awal laci'),
+      notes: notes || (settledOverride
+        ? `Samakan kas laci ke kondisi fisik saat ini (${startDate})`
+        : isStartDateChanged
+          ? `Atur kas awal & mulai hitung sejak ${startDate}`
+          : 'Penyesuaian kas awal laci'),
+      previousState: prevSnapshot,
     };
 
     const updatedLogs = [newLog, ...cashDrawerLogs];
@@ -874,12 +898,13 @@ const App: React.FC = () => {
     setCashDrawerLogs(updatedLogs);
     setInitialCash(amount);
 
-    const [res1, res2] = await Promise.all([
+    const [res1, res2, res3] = await Promise.all([
       supabase.from('app_settings').upsert({ key: 'cashDrawerState', value: nextState }, { onConflict: 'key' }),
       supabase.from('app_settings').upsert({ key: 'cashDrawerLogs', value: updatedLogs }, { onConflict: 'key' }),
+      supabase.from('app_settings').upsert({ key: 'initialCash', value: amount }, { onConflict: 'key' }),
     ]);
-    if (res1.error || res2.error) {
-      alert(`Gagal menyimpan log kas awal: ${res1.error?.message || res2.error?.message}`);
+    if (res1.error || res2.error || res3.error) {
+      alert(`Gagal menyimpan log kas awal: ${res1.error?.message || res2.error?.message || res3.error?.message}`);
     } else {
       alert("Kas awal laci berhasil diperbarui dan dicatat ke log.");
     }
@@ -889,6 +914,7 @@ const App: React.FC = () => {
     depositAmount: number;
     physicalCash?: number;
     recipient: string;
+    depositMode?: 'owner_hold' | 'bank_account' | 'owner_prive';
     depositToAccountId?: string;
     depositToAccountName?: string;
     notes?: string;
@@ -911,6 +937,10 @@ const App: React.FC = () => {
     const baseCash = payload.physicalCash !== undefined ? payload.physicalCash : payload.summary.expectedCash;
     const remainingCash = Math.max(0, baseCash - payload.depositAmount);
     const discrepancy = payload.physicalCash !== undefined ? payload.physicalCash - payload.summary.expectedCash : undefined;
+    const prevSnapshot: CashDrawerState = { ...cashDrawerState };
+
+    const resolvedMode: 'owner_hold' | 'bank_account' | 'owner_prive' =
+      payload.depositMode || (payload.depositToAccountId ? 'bank_account' : 'owner_prive');
 
     const newLog: CashDrawerLog = {
       id: `SETOR-${Date.now()}`,
@@ -928,11 +958,13 @@ const App: React.FC = () => {
       depositAmount: payload.depositAmount,
       remainingCash,
       recipient: payload.recipient,
+      depositMode: resolvedMode,
       depositToAccountId: payload.depositToAccountId,
       depositToAccountName: payload.depositToAccountName,
       operator: profile?.name,
       notes: payload.notes,
       breakdownByMethod: payload.summary.breakdownByMethod,
+      previousState: prevSnapshot,
     };
 
     const nextState: CashDrawerState = {
@@ -959,10 +991,68 @@ const App: React.FC = () => {
     if (res1.error || res2.error || res3.error) {
       alert(`Gagal menyimpan setoran kas: ${res1.error?.message || res2.error?.message || res3.error?.message}`);
     } else {
-      const targetInfo = payload.depositToAccountName ? ` ke rekening ${payload.depositToAccountName}` : '';
+      const targetInfo = resolvedMode === 'owner_hold'
+        ? ` (titipan kas toko di kantong Kas Dipegang Owner)`
+        : resolvedMode === 'bank_account' && payload.depositToAccountName
+          ? ` ke rekening ${payload.depositToAccountName}`
+          : ` (pengambilan permanen / prive owner)`;
       alert(`Setor ke ${payload.recipient}${targetInfo} berhasil dicatat! Sisa modal di laci: Rp ${remainingCash.toLocaleString('id-ID')}`);
     }
-  }, [cashDrawerLogs, profile]);
+  }, [cashDrawerState, cashDrawerLogs, profile]);
+
+  const handleDeleteCashDrawerLog = useCallback(async (logId: string) => {
+    const targetIdx = cashDrawerLogs.findIndex(l => l.id === logId);
+    if (targetIdx === -1) return;
+    const targetLog = cashDrawerLogs[targetIdx];
+    const updatedLogs = cashDrawerLogs.filter(l => l.id !== logId);
+
+    let nextState = cashDrawerState;
+    let nextOpening = initialCash;
+    let stateRestored = false;
+
+    if (targetIdx === 0) {
+      if (targetLog.previousState) {
+        nextState = targetLog.previousState;
+        nextOpening = targetLog.previousState.openingCash;
+        stateRestored = true;
+      } else if (targetLog.type === 'Setor') {
+        nextState = {
+          periodStartDate: targetLog.periodStartDate,
+          periodStartAt: targetLog.timestamp,
+          openingCash: targetLog.openingCash,
+          settledCashInOnStartDate: 0,
+          settledCashOutOnStartDate: 0,
+          settledCashTransferInOnStartDate: 0,
+          settledCashTransferOutOnStartDate: 0,
+        };
+        nextOpening = targetLog.openingCash;
+        stateRestored = true;
+      }
+    }
+
+    setCashDrawerLogs(updatedLogs);
+    if (stateRestored) {
+      setCashDrawerState(nextState);
+      setInitialCash(nextOpening);
+    }
+
+    const promises = [
+      supabase.from('app_settings').upsert({ key: 'cashDrawerLogs', value: updatedLogs }, { onConflict: 'key' }),
+    ];
+    if (stateRestored) {
+      promises.push(
+        supabase.from('app_settings').upsert({ key: 'cashDrawerState', value: nextState }, { onConflict: 'key' }),
+        supabase.from('app_settings').upsert({ key: 'initialCash', value: nextOpening }, { onConflict: 'key' })
+      );
+    }
+    const results = await Promise.all(promises);
+    const err = results.find(r => r.error)?.error;
+    if (err) {
+      alert(`Gagal menghapus log kas laci: ${err.message}`);
+    } else if (stateRestored) {
+      alert('Log kas terbaru dibatalkan dan posisi Kas Akhir (Laci) dikembalikan ke kondisi sebelumnya.');
+    }
+  }, [cashDrawerLogs, cashDrawerState, initialCash]);
 
   const handleSaveFinishingSpaceRules = useCallback(async (newRules: FinishingSpaceRule[]) => {
     setFinishingSpaceRules(newRules);
@@ -2256,7 +2346,7 @@ const App: React.FC = () => {
       case 'dashboard': return <Dashboard onNavigate={handleMenuClick} allOrders={allOrders} boardData={boardData} menuPermissions={userPermissions} expenses={expenses} receivables={receivables} products={products} legacyReceivables={legacyReceivables} />;
       case 'cashFlow': return <CashFlow receivables={receivables} expenses={expenses} expenseMetadata={expenseMetadata} supplierBills={supplierBills} bankInstallments={bankInstallments} privateExpenses={privateExpenses} paymentMethods={paymentMethods} cashDrawerState={cashDrawerState} cashDrawerLogs={cashDrawerLogs} cashTransfers={cashTransfers} accountBalancesMeta={accountBalancesMeta} legacyMonthlyIncomes={legacyMonthlyIncomes} legacyMonthlyExpenses={legacyMonthlyExpenses} onAddCashTransfer={handleAddCashTransfer} onDeleteCashTransfer={handleDeleteCashTransfer} onSaveAccountBalanceMeta={handleSaveAccountBalanceMeta} />;
       case 'sales': return <Sales unprocessedOrders={unprocessedOrders} onSaveOrder={handleSaveOrder} onUpdateOrder={handleUpdateOrder} onProcessOrder={handleProcessOrder} onDeleteOrder={handleDeleteOrder} products={products} categories={categories} finishings={finishings} customers={customers} allOrders={allOrders} boardData={boardData} noteCounter={noteCounter} notePrefix={notePrefix} onUpdateNoteSettings={handleUpdateNoteSettings} receivables={receivables} profile={profile} onSaveLegacyOrder={handleSaveLegacyOrder} />;
-      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} legacyReceivables={legacyReceivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onPayLegacyReceivable={handlePayLegacyReceivable} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} expenseMetadata={expenseMetadata} supplierBills={supplierBills} bankInstallments={bankInstallments} privateExpenses={privateExpenses} initialCash={initialCash} cashDrawerState={cashDrawerState} cashDrawerLogs={cashDrawerLogs} cashTransfers={cashTransfers} currentUserName={profile?.name} onUpdateInitialCash={handleUpdateInitialCash} onUpdateCashDrawerInitial={handleUpdateCashDrawerInitial} onSetorCash={handleSetorCash} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
+      case 'receivables': return <Receivables receivables={receivables} unprocessedOrders={unprocessedOrders} legacyReceivables={legacyReceivables} allOrders={allOrders} boardData={boardData} products={products} finishings={finishings} customers={customers} categories={categories} onProcessPayment={handleProcessPayment} onPayUnprocessedOrder={handlePayUnprocessedOrder} onPayLegacyReceivable={handlePayLegacyReceivable} onBulkProcessPayment={handleBulkProcessPayment} expenses={expenses} expenseMetadata={expenseMetadata} supplierBills={supplierBills} bankInstallments={bankInstallments} privateExpenses={privateExpenses} initialCash={initialCash} cashDrawerState={cashDrawerState} cashDrawerLogs={cashDrawerLogs} cashTransfers={cashTransfers} currentUserName={profile?.name} onUpdateInitialCash={handleUpdateInitialCash} onUpdateCashDrawerInitial={handleUpdateCashDrawerInitial} onSetorCash={handleSetorCash} onDeleteCashDrawerLog={handleDeleteCashDrawerLog} paymentMethods={paymentMethods} onUpdateDueDate={handleUpdateReceivableDueDate} onBulkUpdateDueDate={handleBulkUpdateReceivableDueDate} notificationSettings={notificationSettings} />;
       case 'expenses': return <Expenses expenses={expenses} expenseMetadata={expenseMetadata} suppliers={suppliers} supplierBills={supplierBills} debts={debts} bankInstallments={bankInstallments} privateExpenses={privateExpenses} paymentMethods={paymentMethods} storeInfo={storeInfo} menuPermissions={userPermissions} onAddExpense={handleAddExpense} onUpdateExpense={handleUpdateExpense} onDeleteExpense={handleDeleteExpense} onAddSupplierBill={handleAddSupplierBill} onAddSupplierBillsBatch={handleAddSupplierBillsBatch} onUpdateSupplierBill={handleUpdateSupplierBill} onPaySupplierBill={handlePaySupplierBill} onBulkPaySupplierBills={handleBulkPaySupplierBills} onUpdateSupplierBillPayment={handleUpdateSupplierBillPayment} onDeleteSupplierBillPayment={handleDeleteSupplierBillPayment} onDeleteSupplierBill={handleDeleteSupplierBill} onAddBankInstallment={handleAddBankInstallment} onUpdateBankInstallment={handleUpdateBankInstallment} onPayBankInstallment={handlePayBankInstallment} onUpdateBankInstallmentPayment={handleUpdateBankInstallmentPayment} onDeleteBankInstallmentPayment={handleDeleteBankInstallmentPayment} onDeleteBankInstallment={handleDeleteBankInstallment} onAddPrivateExpense={handleAddPrivateExpense} onUpdatePrivateExpense={handleUpdatePrivateExpense} onToggleReimbursePrivateExpense={handleToggleReimbursePrivateExpense} onDeletePrivateExpense={handleDeletePrivateExpense} />;
       case 'purchases': return <Purchases purchases={purchases} suppliers={suppliers} inventory={inventory} inventoryMetadata={inventoryMetadata} paymentMethods={paymentMethods} currentUserName={profile?.name} onAddPurchase={handleAddPurchase} onDeletePurchase={handleDeletePurchase} onAddInventoryItem={handleAddInventoryItem} />;
       case 'inventory': return <Inventory inventory={inventory} purchases={purchases} inventoryMetadata={inventoryMetadata} inventoryCheckStatus={inventoryCheckStatus} onUseStock={handleUseStock} onAddInventoryItem={handleAddInventoryItem} onUpdateInventoryItem={handleUpdateInventoryItem} onDeleteInventoryItem={handleDeleteInventoryItem} onConfirmInventoryCheck={handleConfirmInventoryCheck} notificationSettings={notificationSettings} />;

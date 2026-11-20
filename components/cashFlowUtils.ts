@@ -10,6 +10,9 @@ import {
     type CashTransferRecord,
 } from '../types';
 
+export const OWNER_HOLD_ACCOUNT_ID = 'owner-hold-cash';
+export const OWNER_HOLD_ACCOUNT_NAME = 'Kas Dipegang Owner (Titipan Toko)';
+
 export const getUtcDateStr = (date: Date = new Date()): string => {
     return date.toISOString().substring(0, 10);
 };
@@ -78,15 +81,18 @@ export const calculateGlobalFinancialRecap = ({
     const operationalExpense = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
     const grossEstimatedBalance = (legacyIncome + orderIncome) - (legacyExpense + operationalExpense);
 
+    const isStoreOutflowSource = (src: string) =>
+        src === 'Kas Laci' || src === 'Transfer Bank' || src === 'Kas Dipegang Owner';
+
     const supplierStorePaid = supplierBills.reduce((sum, bill) => {
         return sum + bill.payments
-            .filter(p => p.fundingSource === 'Kas Laci' || p.fundingSource === 'Transfer Bank')
+            .filter(p => isStoreOutflowSource(p.fundingSource))
             .reduce((ps, p) => ps + Number(p.amount || 0), 0);
     }, 0);
 
     const bankStorePaid = bankInstallments.reduce((sum, inst) => {
         return sum + inst.payments
-            .filter(p => p.fundingSource === 'Kas Laci' || p.fundingSource === 'Transfer Bank')
+            .filter(p => isStoreOutflowSource(p.fundingSource))
             .reduce((ps, p) => ps + Number(p.totalPaid || 0), 0);
     }, 0);
 
@@ -94,9 +100,14 @@ export const calculateGlobalFinancialRecap = ({
         .filter(pe => pe.fundingSource !== 'Uang Pribadi Owner')
         .reduce((sum, pe) => sum + Number(pe.amount || 0), 0);
 
-    // Setor ke rekening bank toko adalah pindah kantong internal, bukan uang keluar usaha
+    // Setor ke rekening bank toko atau Titipan Owner (owner_hold) adalah pindah kantong internal, bukan uang keluar usaha
     const setorOwnerOut = cashDrawerLogs
-        .filter(log => log.type === 'Setor' && !log.depositToAccountId)
+        .filter(log => {
+            if (log.type !== 'Setor') return false;
+            if (log.depositMode === 'owner_hold' || log.depositMode === 'bank_account') return false;
+            if (log.depositMode === 'owner_prive') return true;
+            return !log.depositToAccountId;
+        })
         .reduce((sum, log) => sum + Number(log.depositAmount || 0), 0);
 
     const tarikOwnerOut = cashTransfers

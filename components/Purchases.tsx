@@ -695,6 +695,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                   >
                     <option value="Transfer Bank">Transfer Bank / Rekening Usaha</option>
                     <option value="Kas Laci">Kas Laci (Tunai)</option>
+                    <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                   </select>
                   {fundingSource === 'Transfer Bank' && nonCashAccounts.length > 0 && (
                     <div>
@@ -753,6 +754,7 @@ const Purchases: React.FC<PurchasesProps> = ({
                         >
                           <option value="Transfer Bank">Transfer Bank / Rekening Usaha</option>
                           <option value="Kas Laci">Kas Laci (Tunai)</option>
+                          <option value="Kas Dipegang Owner">Kas Dipegang Owner (Titipan Toko)</option>
                         </select>
                       </div>
                       {fundingSource === 'Transfer Bank' && nonCashAccounts.length > 0 && (
