@@ -1,8 +1,14 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CustomerData, type CategoryData, type InventoryItem, type InventoryCategory, type InventoryCondition, type InventoryItemMeta, type SupplierData, type ExpenseItem, type EmployeeData, type SalaryData } from '../types';
+import { type SavedOrder, type OrderItemData, type ProductData, type ProductCostMeta, type ProductCostGroup, type FinishingData, type CustomerData, type CategoryData, type InventoryItem, type InventoryCategory, type InventoryCondition, type InventoryItemMeta, type SupplierData, type ExpenseItem, type EmployeeData, type SalaryData } from '../types';
 import { PencilIcon, TrashIcon, PlusCircleIcon, MagnifyingGlassIcon } from './Icons';
 import Pagination from './Pagination';
+import {
+    resolveEffectiveProductCost,
+    calculateMasterOrderTotal,
+    calculateOrderTotalFromItems,
+    stampOrderItemsWithSnapshots,
+} from './reportUtils';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -384,7 +390,13 @@ const EditOrderModal: React.FC<{
     const [orderItems, setOrderItems] = useState<OrderItemData[]>(order.orderItems);
     const [customer, setCustomer] = useState(order.customer);
     const [orderDate, setOrderDate] = useState(order.orderDate);
-    const [totalPrice, setTotalPrice] = useState(0);
+    const [totalPrice, setTotalPrice] = useState(order.totalPrice);
+    const [hasPricingChanges, setHasPricingChanges] = useState(false);
+
+    const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+    const categoriesMap = useMemo(() => new Map(categories.map(c => [c.name, c])), [categories]);
+    const customersMap = useMemo(() => new Map(customers.map(c => [c.name, c])), [customers]);
+    const finishingsMap = useMemo(() => new Map(finishings.map(f => [f.name, f])), [finishings]);
 
     const sortedProducts = useMemo(() => {
         return [...products].sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
@@ -399,57 +411,57 @@ const EditOrderModal: React.FC<{
             return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
         });
     }, [finishings]);
-    
-    const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
-        'End Customer': 'endCustomer',
-        'Retail': 'retail',
-        'Grosir': 'grosir',
-        'Reseller': 'reseller',
-        'Corporate': 'corporate'
-    };
-    
+
+    const masterCalculatedTotal = useMemo(
+        () => calculateMasterOrderTotal(orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap),
+        [orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap]
+    );
+
+    const hasEditPriceDrift = !hasPricingChanges && Math.abs(order.totalPrice - masterCalculatedTotal) >= 500;
+
     useEffect(() => {
-        const calculateTotal = () => {
-            const ROUNDING_AMOUNT = 500;
-            const roundUpToNearest = (num: number, nearest: number) => {
-                if (nearest <= 0) return num;
-                return Math.ceil(num / nearest) * nearest;
-            };
+        if (!hasPricingChanges) {
+            setTotalPrice(order.totalPrice);
+            return;
+        }
+        setTotalPrice(
+            calculateOrderTotalFromItems(orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap)
+        );
+    }, [orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap, hasPricingChanges, order.totalPrice]);
 
-            const currentCustomer = customers.find(c => c.name === customer);
-            const customerLevel = currentCustomer ? currentCustomer.level : 'End Customer';
-            const priceKey = priceLevelMap[customerLevel];
-            let total = 0;
-            orderItems.forEach(item => {
-                if (!item.productId) return;
-                const productInfo = products.find(p => p.id === item.productId);
-                const finishingInfo = finishings.find(f => f.name === item.finishing);
-                if (!productInfo) return;
-
-                const categoryInfo = categories.find(c => c.name === productInfo.category);
-                const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-                let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-                const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-                let priceMultiplier = 1;
-                
-                if (isAreaBased) {
-                    const length = parseFloat(item.length) || 0;
-                    const width = parseFloat(item.width) || 0;
-                    priceMultiplier = length * width;
-                }
-                const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-                const itemFinishingTotal = finishingPrice * item.qty; // Finishing price is always per item quantity, not affected by area.
-                total += itemMaterialTotal + itemFinishingTotal;
-            });
-            const roundedTotal = roundUpToNearest(total, ROUNDING_AMOUNT);
-            setTotalPrice(roundedTotal);
-        };
-        calculateTotal();
-    }, [orderItems, customer, products, finishings, customers, categories]);
+    const handleRecalculateToMaster = () => {
+        if (!window.confirm(`Hitung ulang harga order ${order.id} mengikuti tarif Data Master terbaru (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(masterCalculatedTotal)})?`)) {
+            return;
+        }
+        const restamped = stampOrderItemsWithSnapshots(
+            orderItems,
+            customer,
+            productsMap,
+            categoriesMap,
+            customersMap,
+            finishingsMap,
+            { forceMaster: true }
+        );
+        setOrderItems(restamped);
+        setHasPricingChanges(true);
+    };
 
     const handleItemChange = (id: number, field: keyof Omit<OrderItemData, 'id'>, value: string | number) => {
-        let newItems = orderItems.map(item => item.id === id ? { ...item, [field]: value } : item);
+        let newItems = orderItems.map(item => {
+            if (item.id !== id) return item;
+            const updated: OrderItemData = { ...item, [field]: value };
+            if (field === 'productId' || field === 'finishing') {
+                delete updated.unitPriceSnapshot;
+                delete updated.finishingPriceSnapshot;
+                delete updated.lineTotalSnapshot;
+                delete updated.customPrice;
+                delete updated.priceLockedAt;
+            }
+            return updated;
+        });
+        if (field === 'productId' || field === 'finishing' || field === 'length' || field === 'width' || field === 'qty') {
+            setHasPricingChanges(true);
+        }
         if (field === 'productId') {
             const selectedProduct = products.find(p => p.id === value);
             const categoryInfo = categories.find(c => c.name === selectedProduct?.category);
@@ -461,17 +473,25 @@ const EditOrderModal: React.FC<{
         setOrderItems(newItems);
     };
 
-    const addItem = () => setOrderItems([...orderItems, { 
-        id: Date.now(), 
-        productId: products.length > 0 ? products[0].id : null, 
-        finishing: 'Tanpa Finishing', 
-        description: '', 
-        length: '1', 
-        width: '1', 
-        qty: 1 
-    }]);
+    const addItem = () => {
+        setHasPricingChanges(true);
+        setOrderItems([...orderItems, { 
+            id: Date.now(), 
+            productId: products.length > 0 ? products[0].id : null, 
+            finishing: 'Tanpa Finishing', 
+            description: '', 
+            length: '1', 
+            width: '1', 
+            qty: 1 
+        }]);
+    };
 
-    const removeItem = (id: number) => { if (orderItems.length > 1) setOrderItems(orderItems.filter(item => item.id !== id)); };
+    const removeItem = (id: number) => {
+        if (orderItems.length > 1) {
+            setHasPricingChanges(true);
+            setOrderItems(orderItems.filter(item => item.id !== id));
+        }
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -490,13 +510,20 @@ const EditOrderModal: React.FC<{
             return `${description} - ${material} - ${size} - ${quantity}`;
         }).filter(Boolean).join('\n');
 
+        const finalOrderItems = hasPricingChanges
+            ? stampOrderItemsWithSnapshots(orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap)
+            : orderItems;
+        const finalTotalPrice = hasPricingChanges
+            ? calculateOrderTotalFromItems(finalOrderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap)
+            : order.totalPrice;
+
         const updatedOrder: SavedOrder = {
             id: order.id,
             customer,
             orderDate,
-            orderItems,
+            orderItems: finalOrderItems,
             details: orderDetails || 'Tidak ada detail',
-            totalPrice,
+            totalPrice: finalTotalPrice,
         };
         onSave(updatedOrder);
     };
@@ -511,7 +538,7 @@ const EditOrderModal: React.FC<{
                     </div>
                     <div>
                         <label htmlFor="customer" className="block text-sm font-medium">Pelanggan</label>
-                        <select id="customer" value={customer} onChange={(e) => setCustomer(e.target.value)} className="mt-1 w-full p-2 border bg-white rounded-md">
+                        <select id="customer" value={customer} onChange={(e) => { setCustomer(e.target.value); setHasPricingChanges(true); }} className="mt-1 w-full p-2 border bg-white rounded-md">
                             {customers.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                         </select>
                     </div>
@@ -551,7 +578,24 @@ const EditOrderModal: React.FC<{
                 })}
                 
                 <div><button type="button" onClick={addItem} className="w-full flex items-center justify-center py-2 px-4 border-2 border-dashed rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><PlusCircleIcon className="mr-2"/>Tambah Item</button></div>
-                
+
+                {hasEditPriceDrift && (
+                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <span className="font-semibold">Harga Lama Dikunci:</span> Tarif master saat ini berbeda (tarif baru:{' '}
+                            <strong>{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(masterCalculatedTotal)}</strong>).
+                            Total nota tetap dikunci ke nominal lama kecuali Anda hitung ulang.
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleRecalculateToMaster}
+                            className="px-3 py-1.5 rounded-md bg-amber-600 text-white font-semibold hover:bg-amber-700 whitespace-nowrap"
+                        >
+                            Gunakan Tarif Master Terbaru
+                        </button>
+                    </div>
+                )}
+
                 <div className="border-t pt-6 flex justify-between items-center">
                     <div><p className="text-sm">Estimasi Total</p><p className="text-2xl font-bold text-pink-600">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(totalPrice)}</p></div>
                     <button type="submit" className="bg-pink-600 text-white py-3 px-8 rounded-lg font-bold hover:bg-pink-700">Simpan Perubahan</button>
@@ -564,11 +608,36 @@ const EditOrderModal: React.FC<{
 // Sub-komponen untuk Modal Edit Produk
 const EditProductModal: React.FC<{
     product: ProductData;
+    initialMeta?: ProductCostMeta;
+    costGroups: ProductCostGroup[];
     categories: CategoryData[];
     onClose: () => void;
-    onSave: (updatedProduct: ProductData) => void;
-}> = ({ product, categories, onClose, onSave }) => {
+    onSave: (updatedProduct: ProductData, costPrice?: number, costGroupId?: string) => void;
+}> = ({ product, initialMeta, costGroups, categories, onClose, onSave }) => {
     const [formData, setFormData] = useState<ProductData>(product);
+    const hasInitialGroup = Boolean(initialMeta?.costGroupId && costGroups.some(g => g.id === initialMeta.costGroupId));
+    const [costMode, setCostMode] = useState<'group' | 'manual'>(hasInitialGroup ? 'group' : 'manual');
+    const [selectedGroupId, setSelectedGroupId] = useState<string>(hasInitialGroup ? (initialMeta?.costGroupId || '') : '');
+    const [costPrice, setCostPrice] = useState<string>(initialMeta?.costPrice && initialMeta.costPrice > 0 ? String(initialMeta.costPrice) : '');
+
+    const selectedCategoryUnit = useMemo(
+        () => categories.find(c => c.name === formData.category)?.unitType || 'Per Buah',
+        [categories, formData.category]
+    );
+
+    const selectedGroup = useMemo(
+        () => costGroups.find(g => g.id === selectedGroupId),
+        [costGroups, selectedGroupId]
+    );
+
+    const sortedGroups = useMemo(() => {
+        return [...costGroups].sort((a, b) => {
+            const aMatch = a.unitType === selectedCategoryUnit ? 0 : 1;
+            const bMatch = b.unitType === selectedCategoryUnit ? 0 : 1;
+            if (aMatch !== bMatch) return aMatch - bMatch;
+            return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+        });
+    }, [costGroups, selectedCategoryUnit]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
@@ -589,7 +658,12 @@ const EditProductModal: React.FC<{
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave(formData);
+        if (costMode === 'group' && selectedGroupId) {
+            onSave(formData, undefined, selectedGroupId);
+        } else {
+            const numericCost = costPrice.trim() === '' ? 0 : Math.max(0, Number(costPrice) || 0);
+            onSave(formData, numericCost, '');
+        }
     };
 
     const commonInputClass = "mt-1 w-full p-2 border border-gray-300 rounded-md";
@@ -617,6 +691,64 @@ const EditProductModal: React.FC<{
                     <input name="corporate" type="number" placeholder="Corporate" value={formData.price.corporate} onChange={handlePriceChange} className="w-full p-2 border border-gray-300 rounded-md" required />
                   </div>
                 </div>
+                <div className="pt-2 border-t border-gray-100 space-y-2">
+                    <div className="flex items-center justify-between">
+                        <label className="block text-sm font-medium text-gray-700">
+                            Estimasi Modal / HPP ({selectedCategoryUnit === 'Per Luas' ? 'per m²' : 'per pcs/unit'})
+                        </label>
+                        {costGroups.length > 0 && (
+                            <div className="inline-flex rounded-md border border-gray-300 overflow-hidden text-xs">
+                                <button
+                                    type="button"
+                                    onClick={() => setCostMode('group')}
+                                    className={`px-2.5 py-1 font-medium ${costMode === 'group' ? 'bg-pink-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                                >
+                                    Ikut Grup
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setCostMode('manual')}
+                                    className={`px-2.5 py-1 font-medium ${costMode === 'manual' ? 'bg-pink-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                                >
+                                    Manual
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    {costMode === 'group' && costGroups.length > 0 ? (
+                        <div>
+                            <select
+                                value={selectedGroupId}
+                                onChange={e => setSelectedGroupId(e.target.value)}
+                                className={`${commonInputClass} bg-white`}
+                            >
+                                <option value="">-- Pilih Grup Modal Bahan --</option>
+                                {sortedGroups.map(g => (
+                                    <option key={g.id} value={g.id}>
+                                        {g.name} — Rp {g.costPrice.toLocaleString('id-ID')}/{g.unitType === 'Per Luas' ? 'm²' : 'pcs'} ({g.unitType})
+                                    </option>
+                                ))}
+                            </select>
+                            {selectedGroup && selectedGroup.unitType !== selectedCategoryUnit && (
+                                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                                    Perhatian: Produk ini bertipe <strong>{selectedCategoryUnit}</strong>, sedangkan grup dipilih bertipe <strong>{selectedGroup.unitType}</strong>.
+                                </p>
+                            )}
+                        </div>
+                    ) : (
+                        <input
+                            type="number"
+                            min="0"
+                            value={costPrice}
+                            onChange={e => setCostPrice(e.target.value)}
+                            placeholder="Kosongkan atau isi 0 jika belum ada"
+                            className={commonInputClass}
+                        />
+                    )}
+                    <p className="text-[11px] text-gray-500">
+                        Digunakan untuk estimasi HPP &amp; Margin di Laporan Penjualan per Kategori.
+                    </p>
+                </div>
                 <div className="border-t pt-4 flex justify-end">
                     <button type="submit" className="bg-pink-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-pink-700">Simpan Perubahan</button>
                 </div>
@@ -630,6 +762,8 @@ const EditProductModal: React.FC<{
 interface ManagementProps {
   allOrders: SavedOrder[];
   products: ProductData[];
+  productCostMetadata?: Record<number, ProductCostMeta>;
+  productCostGroups?: ProductCostGroup[];
   finishings: FinishingData[];
   customers: CustomerData[];
   categories: CategoryData[];
@@ -642,7 +776,7 @@ interface ManagementProps {
   menuPermissions: string[];
   onUpdateOrder: (updatedOrder: SavedOrder) => void;
   onDeleteOrder: (orderId: string) => void;
-  onUpdateProduct: (updatedProduct: ProductData) => void;
+  onUpdateProduct: (updatedProduct: ProductData, costPrice?: number, costGroupId?: string) => void;
   onDeleteProduct: (productId: number) => void;
   onUpdateCategory: (data: CategoryData) => void;
   onDeleteCategory: (id: number) => void;
@@ -678,7 +812,7 @@ const TABS = [
 ];
 
 const Management: React.FC<ManagementProps> = ({ 
-    allOrders, products, finishings, customers, categories, 
+    allOrders, products, productCostMetadata = {}, productCostGroups = [], finishings, customers, categories, 
     inventory, inventoryMetadata = {}, suppliers, expenses, employees, salaries,
     menuPermissions, onUpdateOrder, onDeleteOrder, onUpdateProduct, onDeleteProduct,
     onUpdateCategory, onDeleteCategory,
@@ -741,8 +875,8 @@ const Management: React.FC<ManagementProps> = ({
             onDeleteOrder(orderId);
         }
     };
-    const handleSaveProduct = (updatedProduct: ProductData) => {
-        onUpdateProduct(updatedProduct);
+    const handleSaveProduct = (updatedProduct: ProductData, costPrice?: number, costGroupId?: string) => {
+        onUpdateProduct(updatedProduct, costPrice, costGroupId);
         setEditingProduct(null);
         alert(`Produk ${updatedProduct.name} berhasil diperbarui.`);
     };
@@ -886,7 +1020,30 @@ const Management: React.FC<ManagementProps> = ({
                      <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="No. Nota" sortKey="id" /><SortableHeader label="Pelanggan" sortKey="customer" /><SortableHeader label="Detail" sortKey="details" /><SortableHeader label="Total" sortKey="totalPrice" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as SavedOrder[]).map(order => (<tr key={order.id}><td className="py-4 px-4 whitespace-nowrap text-sm font-medium">{order.id}</td><td className="py-4 px-4 whitespace-nowrap text-sm">{order.customer}</td><td className="py-4 px-4 text-sm max-w-sm truncate" title={order.details}>{order.details}</td><td className="py-4 px-4 whitespace-nowrap text-sm">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(order.totalPrice)}</td><ActionButtons onEdit={() => setEditingOrder(order)} onDelete={() => handleDeleteOrder(order.id)} /></tr>))}</tbody></table>
                 );
             case 'produk':
-                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kategori" sortKey="category" /><NonSortableHeader label="Harga" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ProductData[]).map(p => (<tr key={p.id}><td className="py-4 px-4 text-sm font-medium">{p.name}</td><td className="py-4 px-4 text-sm">{p.category}</td><td className="py-4 px-4 text-xs">{`${p.price.endCustomer/1000}k / ${p.price.retail/1000}k / ${p.price.grosir/1000}k / ...`}</td><ActionButtons onEdit={() => setEditingProduct(p)} onDelete={() => handleDeleteItem('produk', p.id, p.name)} /></tr>))}</tbody></table>;
+                return <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="Kategori" sortKey="category" /><NonSortableHeader label="Harga" /><NonSortableHeader label="Est. HPP" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as ProductData[]).map(p => {
+                    const effective = resolveEffectiveProductCost(p.id, productCostMetadata, productCostGroups);
+                    const catUnit = categories.find(c => c.name === p.category)?.unitType === 'Per Luas' ? 'm²' : 'pcs';
+                    return (
+                        <tr key={p.id}>
+                            <td className="py-4 px-4 text-sm font-medium">{p.name}</td>
+                            <td className="py-4 px-4 text-sm">{p.category}</td>
+                            <td className="py-4 px-4 text-xs">{`${p.price.endCustomer/1000}k / ${p.price.retail/1000}k / ${p.price.grosir/1000}k / ...`}</td>
+                            <td className="py-4 px-4 text-xs">
+                                {effective.costPrice > 0 ? (
+                                    <div>
+                                        <span className="font-semibold text-amber-700">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(effective.costPrice)}/{catUnit}</span>
+                                        {effective.source === 'group' && effective.group && (
+                                            <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[10px] rounded bg-indigo-50 text-indigo-700 font-medium">Grup: {effective.group.name}</span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <span className="text-gray-400 italic">-</span>
+                                )}
+                            </td>
+                            <ActionButtons onEdit={() => setEditingProduct(p)} onDelete={() => handleDeleteItem('produk', p.id, p.name)} />
+                        </tr>
+                    );
+                })}</tbody></table>;
             case 'stok':
                 return <> <div className="flex justify-end mb-4"><button onClick={() => setIsAddingInventory(true)} className="flex items-center bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700"><PlusCircleIcon className="mr-2 h-4 w-4" />Tambah Stok</button></div> <table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><SortableHeader label="Nama" sortKey="name" /><SortableHeader label="SKU" sortKey="sku" /><NonSortableHeader label="Kategori" /><SortableHeader label="Stok" sortKey="stock" /><NonSortableHeader label="Aksi" /></tr></thead><tbody className="divide-y divide-gray-200">{(paginatedData as InventoryItem[]).map(i => (<tr key={i.id}><td className="py-4 px-4 text-sm font-medium">{i.name}</td><td className="py-4 px-4 text-sm">{i.sku}</td><td className="py-4 px-4 text-sm">{inventoryMetadata[i.id]?.category || 'Bahan Baku'}</td><td className="py-4 px-4 text-sm">{i.stock} {i.unit}</td><ActionButtons onEdit={() => setEditingInventory(i)} onDelete={() => handleDeleteItem('stok', i.id, i.name)} /></tr>))}</tbody></table></>;
             case 'kategori':
@@ -956,6 +1113,8 @@ const Management: React.FC<ManagementProps> = ({
             {editingProduct && (
                 <EditProductModal 
                     product={editingProduct}
+                    initialMeta={productCostMetadata[editingProduct.id]}
+                    costGroups={productCostGroups}
                     categories={categories}
                     onClose={() => setEditingProduct(null)}
                     onSave={handleSaveProduct}

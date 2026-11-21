@@ -3,7 +3,7 @@ import React from 'react';
 import { type MenuItem } from './types';
 import { 
   HomeIcon, ShoppingCartIcon, CreditCardIcon, ReceiptTaxIcon, CircleStackIcon, CubeIcon, 
-  WrenchScrewdriverIcon, ChartBarIcon, Cog6ToothIcon, TableCellsIcon, CalendarDaysIcon, Squares2X2Icon, TruckIcon, CurrencyDollarIcon
+  WrenchScrewdriverIcon, ChartBarIcon, Cog6ToothIcon, TableCellsIcon, CalendarDaysIcon, Squares2X2Icon, TruckIcon, CurrencyDollarIcon, BriefcaseIcon
 } from './components/Icons';
 
 export const MENU_ITEMS: MenuItem[] = [
@@ -17,6 +17,17 @@ export const MENU_ITEMS: MenuItem[] = [
     ]
   },
   { key: 'cashFlow', label: 'Arus Kas', icon: <CurrencyDollarIcon /> },
+  { 
+    key: 'ownerFinance', 
+    label: 'Owner Dashboard', 
+    icon: <BriefcaseIcon />,
+    tabs: [
+      { key: 'summary', label: 'Ringkasan, Gaji & Bonus' },
+      { key: 'closing', label: 'Tutup Buku & Pos Alokasi' },
+      { key: 'assetsDebts', label: 'Aset, Modal & Hutang' },
+      { key: 'transactions', label: 'Riwayat Transaksi Owner' },
+    ]
+  },
   { key: 'sales', label: 'Order', icon: <ShoppingCartIcon /> },
   { key: 'production', label: 'Produksi / Status Order', icon: <WrenchScrewdriverIcon /> },
   { key: 'printLayout', label: 'Layout Otomatis', icon: <Squares2X2Icon /> },
@@ -66,7 +77,7 @@ export const MENU_ITEMS: MenuItem[] = [
       { key: 'categorySales', label: 'Penjualan per Kategori' },
       { key: 'receivables', label: 'Piutang' },
       { key: 'inventory', label: 'Stok' },
-      { key: 'assetsDebts', label: 'Aset dan Hutang' },
+      { key: 'assetsDebts', label: 'Neraca (Aset & Hutang)' },
       { key: 'dataPenjualanLama', label: 'Data Penjualan Lama' },
       { key: 'dataPiutangLama', label: 'Data Piutang Lama' },
     ]

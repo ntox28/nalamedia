@@ -1552,6 +1552,11 @@ const Expenses: React.FC<ExpensesProps> = ({
                               Otomatis dari Barang Masuk
                             </span>
                           )}
+                          {meta?.ownerTxId && (
+                            <span className="inline-block text-[10px] bg-fuchsia-50 text-fuchsia-700 px-1.5 py-0.5 rounded font-semibold mt-0.5">
+                              Otomatis dari Owner Dashboard
+                            </span>
+                          )}
                           {meta?.notes && <p className="text-xs text-gray-400">{meta.notes}</p>}
                         </td>
                         <td className="py-3 px-4">
@@ -2123,7 +2128,7 @@ const Expenses: React.FC<ExpensesProps> = ({
               <div>
                 <h3 className="text-lg font-bold text-gray-800">Daftar Cicilan Bank / Leasing (Angsuran Fleksibel / Non-Flat)</h3>
                 <p className="text-xs text-gray-500">
-                  Isi jumlah kredit awal dan catat nominal angsuran + tanggal sesuai tagihan bulan berjalan. Tersinkron dengan Laporan Aset & Hutang.
+                  Isi jumlah kredit awal dan catat nominal angsuran + tanggal sesuai tagihan bulan berjalan. Tersinkron dengan Aset &amp; Hutang (Owner Dashboard &amp; Laporan Neraca).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

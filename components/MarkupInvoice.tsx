@@ -17,6 +17,7 @@ import {
   TagIcon,
   CurrencyDollarIcon
 } from './Icons';
+import { resolveLockedOrderItemTotals } from './reportUtils';
 
 export interface MarkupItemData {
   id: number;
@@ -106,13 +107,14 @@ export const MarkupInvoice: React.FC<MarkupInvoiceProps> = ({
     ).slice(0, 10);
   }, [searchQuery, combinedOrders]);
 
-  // Convert an OrderItemData into a MarkupItemData
-  const convertToMarkupItem = (item: OrderItemData, custName: string): MarkupItemData => {
-    const customerLevel = getCustomerLevel(custName);
-    const priceKey = priceLevelMap[customerLevel];
+  const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const categoriesMap = useMemo(() => new Map(categories.map(c => [c.name, c])), [categories]);
+  const customersMap = useMemo(() => new Map(customers.map(c => [c.name, c])), [customers]);
+  const finishingsMap = useMemo(() => new Map(finishings.map(f => [f.name, f])), [finishings]);
 
+  // Convert an OrderItemData into a MarkupItemData using locked/snapshot subtotal
+  const convertToMarkupItem = (item: OrderItemData, lockedSubtotal: number): MarkupItemData => {
     const product = products.find(p => p.id === item.productId);
-    const finishing = finishings.find(f => f.name === item.finishing);
     const category = categories.find(c => c.name === product?.category);
     const isAreaBased = category?.unitType === 'Per Luas';
 
@@ -123,13 +125,9 @@ export const MarkupInvoice: React.FC<MarkupInvoiceProps> = ({
       multiplier = l * w;
     }
 
-    const materialBasePrice = product ? (product.price[priceKey] || product.price.endCustomer || 0) : 0;
-    const finishingPrice = finishing ? finishing.price : 0;
-
-    const originalSubtotal = (materialBasePrice * multiplier + finishingPrice) * item.qty;
-    const effectiveUnitPrice = multiplier > 0
-      ? materialBasePrice + (finishingPrice / multiplier)
-      : materialBasePrice + finishingPrice;
+    const qty = item.qty || 1;
+    const totalUnits = (isAreaBased ? multiplier : 1) * qty;
+    const effectiveUnitPrice = totalUnits > 0 ? lockedSubtotal / totalUnits : lockedSubtotal;
 
     return {
       id: item.id,
@@ -140,13 +138,13 @@ export const MarkupInvoice: React.FC<MarkupInvoiceProps> = ({
       finishing: item.finishing || 'Tanpa Finishing',
       length: item.length || '1',
       width: item.width || '1',
-      qty: item.qty || 1,
+      qty,
       isAreaBased,
       multiplier,
       originalUnitPrice: Math.round(effectiveUnitPrice),
-      originalSubtotal: Math.round(originalSubtotal),
+      originalSubtotal: Math.round(lockedSubtotal),
       markupUnitPrice: Math.round(effectiveUnitPrice),
-      markupSubtotal: Math.round(originalSubtotal)
+      markupSubtotal: Math.round(lockedSubtotal)
     };
   };
 
@@ -159,7 +157,16 @@ export const MarkupInvoice: React.FC<MarkupInvoiceProps> = ({
     setPaymentStatus('Lunas');
     setNotaNotes('Terima kasih atas pesanan dan kepercayaannya.');
 
-    const markupItems = order.orderItems.map(item => convertToMarkupItem(item, order.customer));
+    const { itemTotals } = resolveLockedOrderItemTotals(
+      order.orderItems,
+      order.totalPrice,
+      order.customer,
+      productsMap,
+      categoriesMap,
+      customersMap,
+      finishingsMap
+    );
+    const markupItems = order.orderItems.map((item, idx) => convertToMarkupItem(item, itemTotals[idx] ?? 0));
     setItems(markupItems);
     setIsEditing(false); // Show the review/confirmation card first
   };

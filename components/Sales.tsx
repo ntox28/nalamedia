@@ -3,6 +3,12 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Cog6ToothIcon, PlusCircleIcon, TrashIcon, PencilIcon, PrinterIcon, PlayIcon, ClipboardIcon, ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, MagnifyingGlassIcon, CurrencyDollarIcon, TagIcon } from './Icons';
 import { type SavedOrder, type OrderItemData, type ProductData, type FinishingData, type CategoryData, type KanbanData, type CardData, type CustomerData, type ReceivableItem, type Profile } from '../types';
 import MarkupInvoice from './MarkupInvoice';
+import {
+  calculateCanonicalOrderItemPrice,
+  calculateMasterOrderTotal,
+  calculateOrderTotalFromItems,
+  stampOrderItemsWithSnapshots,
+} from './reportUtils';
 
 const getInitialState = () => ({
   orderItems: [{ 
@@ -62,43 +68,13 @@ const SimulationModal: React.FC<{
   finishings: FinishingData[];
 }> = ({ result, onClose, products, categories, customers, finishings }) => {
 
-  const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
-    'End Customer': 'endCustomer', 'Retail': 'retail', 'Grosir': 'grosir', 'Reseller': 'reseller', 'Corporate': 'corporate'
-  };
+  const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const categoriesMap = useMemo(() => new Map(categories.map(c => [c.name, c])), [categories]);
+  const customersMap = useMemo(() => new Map(customers.map(c => [c.name, c])), [customers]);
+  const finishingsMap = useMemo(() => new Map(finishings.map(f => [f.name, f])), [finishings]);
 
-  const getCustomerLevel = (customerName: string): CustomerData['level'] => {
-    const match = customerName.match(/\(([^)]+)\)/);
-    if (match) {
-        const level = match[1] as CustomerData['level'];
-        if (['End Customer', 'Retail', 'Grosir', 'Reseller', 'Corporate'].includes(level)) {
-            return level;
-        }
-    }
-    const customerData = customers.find(c => c.name === customerName);
-    return customerData ? customerData.level : 'End Customer';
-  };
-
-  const calculateItemPrice = (item: OrderItemData): number => {
-    const customerLevel = getCustomerLevel(result.customer);
-    const priceKey = priceLevelMap[customerLevel];
-    if (!item.productId) return 0;
-    const productInfo = products.find(p => p.id === item.productId);
-    const finishingInfo = finishings.find(f => f.name === item.finishing);
-    if (!productInfo) return 0;
-    const categoryInfo = categories.find(c => c.name === productInfo.category);
-    const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-    let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-    const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-    let priceMultiplier = 1;
-    if (isAreaBased) {
-        const length = parseFloat(item.length) || 0;
-        const width = parseFloat(item.width) || 0;
-        priceMultiplier = length * width;
-    }
-    const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-    const itemFinishingTotal = finishingPrice * item.qty;
-    return itemMaterialTotal + itemFinishingTotal;
-  };
+  const calculateItemPrice = (item: OrderItemData): number =>
+    calculateCanonicalOrderItemPrice(item, result.customer, productsMap, categoriesMap, customersMap, finishingsMap);
   
   const handlePrint = () => {
     const displayCustomerName = result.customer.split('(')[0].trim();
@@ -376,11 +352,18 @@ const Sales: React.FC<SalesProps> = ({
   const [orderDate, setOrderDate] = useState(getInitialState().orderDate);
   const [totalPrice, setTotalPrice] = useState(0);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [editingOriginalOrder, setEditingOriginalOrder] = useState<SavedOrder | null>(null);
+  const [hasPricingChanges, setHasPricingChanges] = useState(false);
   const [modalData, setModalData] = useState<{ title: string; orders: CardData[] } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isNotaSettingsOpen, setIsNotaSettingsOpen] = useState(false);
   const [mode, setMode] = useState<'order' | 'simulation' | 'markup' | 'legacy' | 'prompt'>('order');
   const [simulationResult, setSimulationResult] = useState<SavedOrder | null>(null);
+
+  const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const categoriesMap = useMemo(() => new Map(categories.map(c => [c.name, c])), [categories]);
+  const customersMap = useMemo(() => new Map(customers.map(c => [c.name, c])), [customers]);
+  const finishingsMap = useMemo(() => new Map(finishings.map(f => [f.name, f])), [finishings]);
 
   // State for prompt generator
   const [promptData, setPromptData] = useState({
@@ -423,14 +406,6 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
 
   const today = new Date().toISOString().substring(0, 10);
-  
-  const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
-    'End Customer': 'endCustomer',
-    'Retail': 'retail',
-    'Grosir': 'grosir',
-    'Reseller': 'reseller',
-    'Corporate': 'corporate'
-  };
   
   const getItemsCount = (cards: CardData[]): number => {
       return cards.reduce((sum, card) => {
@@ -512,6 +487,9 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
   };
 
   const handleCustomerSelect = (selectedCustomerName: string) => {
+    if (editingOriginalOrder && selectedCustomerName !== customer) {
+      setHasPricingChanges(true);
+    }
     setCustomer(selectedCustomerName);
     setCustomerInputValue(selectedCustomerName);
     setIsCustomerDropdownOpen(false);
@@ -533,70 +511,73 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
   };
   // --- End Customer Combobox Logic ---
 
-  const getCustomerLevel = useCallback((customerName: string): CustomerData['level'] => {
-      const match = customerName.match(/\(([^)]+)\)/);
-      if (match) {
-          const level = match[1] as CustomerData['level'];
-          if (['End Customer', 'Retail', 'Grosir', 'Reseller', 'Corporate'].includes(level)) {
-              return level;
-          }
-      }
-      const realCustomer = customers.find(c => c.name === customerName);
-      return realCustomer ? realCustomer.level : 'End Customer';
-  }, [customers]);
+  const masterCalculatedTotal = useMemo(() => {
+    if (!customer) return 0;
+    return calculateMasterOrderTotal(orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap);
+  }, [orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap]);
+
+  const hasEditPriceDrift = Boolean(
+    editingOriginalOrder &&
+    !hasPricingChanges &&
+    Math.abs(editingOriginalOrder.totalPrice - masterCalculatedTotal) >= 500
+  );
 
   useEffect(() => {
-    const calculateTotal = () => {
-      if (!customer) {
-        setTotalPrice(0);
-        return;
-      }
+    if (!customer) {
+      setTotalPrice(0);
+      return;
+    }
+    if (editingOriginalOrder && !hasPricingChanges) {
+      setTotalPrice(editingOriginalOrder.totalPrice);
+      return;
+    }
+    const nextTotal = calculateOrderTotalFromItems(
+      orderItems,
+      customer,
+      productsMap,
+      categoriesMap,
+      customersMap,
+      finishingsMap
+    );
+    setTotalPrice(nextTotal);
+  }, [orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap, editingOriginalOrder, hasPricingChanges]);
 
-      const ROUNDING_AMOUNT = 500;
-      const roundUpToNearest = (num: number, nearest: number) => {
-          if (nearest <= 0) return num;
-          return Math.ceil(num / nearest) * nearest;
-      };
-      
-      const customerLevel = getCustomerLevel(customer);
-      const priceKey = priceLevelMap[customerLevel];
-      
-      let total = 0;
-      orderItems.forEach(item => {
-        if (!item.productId) return;
-        
-        const productInfo = products.find(p => p.id === item.productId);
-        const finishingInfo = finishings.find(f => f.name === item.finishing);
-        
-        if (!productInfo) return;
-        
-        const categoryInfo = categories.find(c => c.name === productInfo.category);
-        const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-        let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-        let priceMultiplier = 1;
-        
-        if (isAreaBased) {
-            const length = parseFloat(item.length) || 0;
-            const width = parseFloat(item.width) || 0;
-            priceMultiplier = length * width;
-        }
-        
-        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-        const itemFinishingTotal = finishingPrice * item.qty; // Finishing price is always per item quantity, not affected by area.
-        total += itemMaterialTotal + itemFinishingTotal;
-      });
-
-      const roundedTotal = roundUpToNearest(total, ROUNDING_AMOUNT);
-      setTotalPrice(roundedTotal);
-    };
-    calculateTotal();
-  }, [orderItems, customer, products, finishings, customers, categories, getCustomerLevel]);
+  const handleRecalculateEditToMaster = () => {
+    if (!editingOriginalOrder) return;
+    if (!window.confirm(`Hitung ulang harga order ${editingOriginalOrder.id} mengikuti tarif Data Master terbaru (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(masterCalculatedTotal)})?`)) {
+      return;
+    }
+    const restamped = stampOrderItemsWithSnapshots(
+      orderItems,
+      customer,
+      productsMap,
+      categoriesMap,
+      customersMap,
+      finishingsMap,
+      { forceMaster: true }
+    );
+    setOrderItems(restamped);
+    setHasPricingChanges(true);
+  };
 
   const handleItemChange = (id: number, field: keyof Omit<OrderItemData, 'id'>, value: string | number) => {
-    let newItems = orderItems.map(item => item.id === id ? { ...item, [field]: value } : item);
-    
+    let newItems = orderItems.map(item => {
+      if (item.id !== id) return item;
+      const updated: OrderItemData = { ...item, [field]: value };
+      if (field === 'productId' || field === 'finishing') {
+        delete updated.unitPriceSnapshot;
+        delete updated.finishingPriceSnapshot;
+        delete updated.lineTotalSnapshot;
+        delete updated.customPrice;
+        delete updated.priceLockedAt;
+      }
+      return updated;
+    });
+
+    if (editingOriginalOrder && (field === 'productId' || field === 'finishing' || field === 'length' || field === 'width' || field === 'qty')) {
+      setHasPricingChanges(true);
+    }
+
     if (field === 'productId') {
         const changedItem = newItems.find(item => item.id === id);
         if (!changedItem) return;
@@ -633,7 +614,9 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
     setOrderItems(newItems);
   };
 
-  const addItem = () => setOrderItems([...orderItems, { 
+  const addItem = () => {
+    if (editingOriginalOrder) setHasPricingChanges(true);
+    setOrderItems([...orderItems, { 
       id: Date.now(), 
       productId: null, 
       finishing: 'Tanpa Finishing', 
@@ -641,8 +624,14 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
       length: '1', 
       width: '1', 
       qty: 1 
-  }]);
-  const removeItem = (id: number) => { if (orderItems.length > 1) setOrderItems(orderItems.filter(item => item.id !== id)); };
+    }]);
+  };
+  const removeItem = (id: number) => {
+    if (orderItems.length > 1) {
+      if (editingOriginalOrder) setHasPricingChanges(true);
+      setOrderItems(orderItems.filter(item => item.id !== id));
+    }
+  };
   
   const resetForm = useCallback(() => {
     setOrderItems(getInitialState().orderItems);
@@ -650,6 +639,8 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
     setCustomerInputValue(getInitialState().customer);
     setOrderDate(getInitialState().orderDate);
     setEditingOrderId(null);
+    setEditingOriginalOrder(null);
+    setHasPricingChanges(false);
   }, []);
 
   const handleModeChange = (newMode: 'order' | 'simulation' | 'markup' | 'legacy' | 'prompt') => {
@@ -708,13 +699,23 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
       .filter(Boolean)
       .join('\n');
 
+    const shouldLockOriginalTotal = Boolean(editingOrderId && editingOriginalOrder && !hasPricingChanges);
+    const finalOrderItems = (mode === 'order' && !shouldLockOriginalTotal)
+      ? stampOrderItemsWithSnapshots(orderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap)
+      : orderItems;
+    const finalTotalPrice = shouldLockOriginalTotal && editingOriginalOrder
+      ? editingOriginalOrder.totalPrice
+      : (mode === 'order'
+          ? calculateOrderTotalFromItems(finalOrderItems, customer, productsMap, categoriesMap, customersMap, finishingsMap)
+          : totalPrice);
+
     const orderData: SavedOrder = {
         id: editingOrderId || getNextNotaNumber(),
         customer,
         orderDate,
-        orderItems,
+        orderItems: finalOrderItems,
         details: orderDetails || 'Tidak ada detail',
-        totalPrice,
+        totalPrice: finalTotalPrice,
     };
 
     if (mode === 'simulation') {
@@ -738,6 +739,8 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
   const handleEdit = (order: SavedOrder) => {
       handleModeChange('order'); // Switch to order mode when editing
       setEditingOrderId(order.id);
+      setEditingOriginalOrder(order);
+      setHasPricingChanges(false);
       setCustomer(order.customer);
       setCustomerInputValue(order.customer);
       setOrderDate(order.orderDate);
@@ -1261,6 +1264,22 @@ The layout should be eye-catching, clear, and specifically tailored for ${prompt
               )
             })}
             <div><button type="button" onClick={addItem} className="w-full flex items-center justify-center py-2 px-4 border-2 border-dashed rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50"><PlusCircleIcon className="mr-2"/>Tambah Item</button></div>
+            {hasEditPriceDrift && editingOriginalOrder && (
+              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="font-semibold">Harga Lama Dikunci:</span> Tarif produk/finishing saat ini berbeda (tarif baru:{' '}
+                  <strong>{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(masterCalculatedTotal)}</strong>).
+                  Total nota lama tetap dipertahankan kecuali Anda hitung ulang.
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRecalculateEditToMaster}
+                  className="px-3 py-1.5 rounded-md bg-amber-600 text-white font-semibold hover:bg-amber-700 whitespace-nowrap"
+                >
+                  Gunakan Tarif Master Terbaru
+                </button>
+              </div>
+            )}
             <div className="border-t pt-6 flex justify-between items-center">
               <div><p className="text-sm">Estimasi Total</p><p className="text-2xl font-bold text-pink-600">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(totalPrice)}</p></div>
               <button type="submit" className={`text-white py-3 px-8 rounded-lg font-bold ${

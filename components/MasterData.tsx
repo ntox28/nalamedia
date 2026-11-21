@@ -1,10 +1,11 @@
 
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { type ProductData, type CategoryData, type FinishingData, type CustomerData, type SupplierData, type EmployeeData, type UserLevel } from '../types';
+import { type ProductData, type ProductCostMeta, type ProductCostGroup, type CategoryData, type FinishingData, type CustomerData, type SupplierData, type EmployeeData, type UserLevel } from '../types';
 import * as XLSX from 'xlsx';
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, PencilIcon, TrashIcon } from './Icons';
 import Pagination from './Pagination';
+import { resolveEffectiveProductCost } from './reportUtils';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -19,6 +20,8 @@ const TABS = [
 
 interface MasterDataProps {
   products: ProductData[];
+  productCostMetadata?: Record<number, ProductCostMeta>;
+  productCostGroups?: ProductCostGroup[];
   categories: CategoryData[];
   finishings: FinishingData[];
   customers: CustomerData[];
@@ -26,9 +29,12 @@ interface MasterDataProps {
   employees: EmployeeData[];
   menuPermissions: string[];
   userLevel?: UserLevel;
-  onAddProduct: (newProduct: Omit<ProductData, 'id'>) => void;
-  onUpdateProduct: (updatedProduct: ProductData) => void;
+  onAddProduct: (newProduct: Omit<ProductData, 'id'>, costPrice?: number, costGroupId?: string) => void;
+  onUpdateProduct: (updatedProduct: ProductData, costPrice?: number, costGroupId?: string) => void;
   onDeleteProduct: (id: number) => void;
+  onSaveProductCostGroup?: (group: Omit<ProductCostGroup, 'id' | 'updatedAt' | 'updatedBy'> & { id?: string }) => Promise<void>;
+  onDeleteProductCostGroup?: (groupId: string, keepLastPriceAsManual?: boolean) => Promise<void>;
+  onBulkUpdateProductCosts?: (updates: Array<{ productId: number; mode: 'group' | 'manual' | 'clear'; costGroupId?: string; costPrice?: number }>) => Promise<void>;
   onAddCategory: (newCategory: Omit<CategoryData, 'id'>) => void;
   onUpdateCategory: (updatedCategory: CategoryData) => void;
   onDeleteCategory: (id: number) => void;
@@ -65,9 +71,11 @@ const Modal: React.FC<{ show: boolean; onClose: () => void; title: string; child
 
 const ProductForm: React.FC<{
     categories: CategoryData[];
+    costGroups: ProductCostGroup[];
     initialData?: ProductData | null;
+    initialMeta?: ProductCostMeta;
     onSubmit: (data: any) => void;
-}> = ({ categories, initialData, onSubmit }) => {
+}> = ({ categories, costGroups, initialData, initialMeta, onSubmit }) => {
     const [name, setName] = useState(initialData?.name || '');
     const [category, setCategory] = useState(initialData?.category || categories[0]?.name || '');
     const [prices, setPrices] = useState({
@@ -77,6 +85,29 @@ const ProductForm: React.FC<{
         reseller: initialData ? String(initialData.price.reseller) : '',
         corporate: initialData ? String(initialData.price.corporate) : '',
     });
+    const hasInitialGroup = Boolean(initialMeta?.costGroupId && costGroups.some(g => g.id === initialMeta.costGroupId));
+    const [costMode, setCostMode] = useState<'group' | 'manual'>(hasInitialGroup ? 'group' : 'manual');
+    const [selectedGroupId, setSelectedGroupId] = useState<string>(hasInitialGroup ? (initialMeta?.costGroupId || '') : '');
+    const [costPrice, setCostPrice] = useState(initialMeta?.costPrice && initialMeta.costPrice > 0 ? String(initialMeta.costPrice) : '');
+
+    const selectedCategoryUnit = useMemo(
+        () => categories.find(c => c.name === category)?.unitType || 'Per Buah',
+        [categories, category]
+    );
+
+    const selectedGroup = useMemo(
+        () => costGroups.find(g => g.id === selectedGroupId),
+        [costGroups, selectedGroupId]
+    );
+
+    const sortedGroups = useMemo(() => {
+        return [...costGroups].sort((a, b) => {
+            const aMatch = a.unitType === selectedCategoryUnit ? 0 : 1;
+            const bMatch = b.unitType === selectedCategoryUnit ? 0 : 1;
+            if (aMatch !== bMatch) return aMatch - bMatch;
+            return a.name.localeCompare(b.name, 'id', { sensitivity: 'base' });
+        });
+    }, [costGroups, selectedCategoryUnit]);
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -91,6 +122,10 @@ const ProductForm: React.FC<{
                 reseller: Number(prices.reseller) || 0,
                 corporate: Number(prices.corporate) || 0,
             },
+            costPrice: costMode === 'group' && selectedGroupId
+                ? undefined
+                : (costPrice.trim() === '' ? 0 : Math.max(0, Number(costPrice) || 0)),
+            costGroupId: costMode === 'group' && selectedGroupId ? selectedGroupId : '',
         });
     };
 
@@ -134,6 +169,64 @@ const ProductForm: React.FC<{
                 </div>
               </div>
             </div>
+            <div className="pt-2 border-t border-gray-100 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                    <label className="block text-xs font-medium text-gray-700">
+                        Estimasi Modal / HPP ({selectedCategoryUnit === 'Per Luas' ? 'per m²' : 'per pcs/unit'})
+                    </label>
+                    {costGroups.length > 0 && (
+                        <div className="inline-flex rounded-md border border-gray-300 overflow-hidden text-[11px]">
+                            <button
+                                type="button"
+                                onClick={() => setCostMode('group')}
+                                className={`px-2 py-0.5 font-medium ${costMode === 'group' ? 'bg-pink-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                            >
+                                Ikut Grup
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setCostMode('manual')}
+                                className={`px-2 py-0.5 font-medium ${costMode === 'manual' ? 'bg-pink-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                            >
+                                Manual
+                            </button>
+                        </div>
+                    )}
+                </div>
+                {costMode === 'group' && costGroups.length > 0 ? (
+                    <div>
+                        <select
+                            value={selectedGroupId}
+                            onChange={e => setSelectedGroupId(e.target.value)}
+                            className={`${commonInputClass} bg-white text-sm`}
+                        >
+                            <option value="">-- Pilih Grup Modal Bahan --</option>
+                            {sortedGroups.map(g => (
+                                <option key={g.id} value={g.id}>
+                                    {g.name} — Rp {g.costPrice.toLocaleString('id-ID')}/{g.unitType === 'Per Luas' ? 'm²' : 'pcs'} ({g.unitType})
+                                </option>
+                            ))}
+                        </select>
+                        {selectedGroup && selectedGroup.unitType !== selectedCategoryUnit && (
+                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                                Perhatian: Kategori produk bertipe <strong>{selectedCategoryUnit}</strong>, sedangkan grup ini bertipe <strong>{selectedGroup.unitType}</strong>.
+                            </p>
+                        )}
+                    </div>
+                ) : (
+                    <input
+                        value={costPrice}
+                        onChange={e => setCostPrice(e.target.value)}
+                        type="number"
+                        min="0"
+                        placeholder={`Contoh: 12000 (kosongkan jika belum ada)`}
+                        className={commonInputClass}
+                    />
+                )}
+                <p className="text-[11px] text-gray-500">
+                    Hanya dipakai untuk estimasi HPP &amp; Margin di Laporan Penjualan per Kategori. Tidak memengaruhi transaksi kasir.
+                </p>
+            </div>
             <button type="submit" className="w-full bg-pink-600 text-white py-2 rounded-lg font-semibold hover:bg-pink-700 mt-4">
                 {initialData ? 'Simpan Perubahan' : 'Simpan'}
             </button>
@@ -141,23 +234,607 @@ const ProductForm: React.FC<{
     );
 }
 
+// --- Kelola Grup Modal Bahan (HPP) ---
+const CostGroupsModal: React.FC<{
+  show: boolean;
+  onClose: () => void;
+  groups: ProductCostGroup[];
+  productCostMetadata: Record<number, ProductCostMeta>;
+  onSaveGroup: (group: Omit<ProductCostGroup, 'id' | 'updatedAt' | 'updatedBy'> & { id?: string }) => Promise<void>;
+  onDeleteGroup: (groupId: string, keepLastPriceAsManual?: boolean) => Promise<void>;
+}> = ({ show, onClose, groups, productCostMetadata, onSaveGroup, onDeleteGroup }) => {
+  const [editingGroup, setEditingGroup] = useState<ProductCostGroup | null>(null);
+  const [name, setName] = useState('');
+  const [unitType, setUnitType] = useState<'Per Luas' | 'Per Buah'>('Per Luas');
+  const [costPrice, setCostPrice] = useState('');
+  const [notes, setNotes] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const usageCountByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    (Object.values(productCostMetadata) as ProductCostMeta[]).forEach(meta => {
+      if (meta?.costGroupId) {
+        counts.set(meta.costGroupId, (counts.get(meta.costGroupId) || 0) + 1);
+      }
+    });
+    return counts;
+  }, [productCostMetadata]);
+
+  useEffect(() => {
+    if (!show) {
+      setEditingGroup(null);
+      setName('');
+      setUnitType('Per Luas');
+      setCostPrice('');
+      setNotes('');
+    }
+  }, [show]);
+
+  if (!show) return null;
+
+  const handleStartEdit = (g: ProductCostGroup) => {
+    setEditingGroup(g);
+    setName(g.name);
+    setUnitType(g.unitType);
+    setCostPrice(String(g.costPrice));
+    setNotes(g.notes || '');
+  };
+
+  const handleResetForm = () => {
+    setEditingGroup(null);
+    setName('');
+    setUnitType('Per Luas');
+    setCostPrice('');
+    setNotes('');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const numericCost = Number(costPrice);
+    if (!name.trim() || !numericCost || numericCost <= 0) {
+      alert('Isi nama grup dan nominal HPP lebih dari 0.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSaveGroup({
+        ...(editingGroup ? { id: editingGroup.id } : {}),
+        name: name.trim(),
+        unitType,
+        costPrice: numericCost,
+        notes: notes.trim() || undefined,
+      });
+      handleResetForm();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (g: ProductCostGroup) => {
+    const linkedCount = usageCountByGroup.get(g.id) || 0;
+    const msg = linkedCount > 0
+      ? `Grup "${g.name}" sedang dipakai oleh ${linkedCount} produk.\n\nJika dihapus, ke-${linkedCount} produk tersebut akan otomatis menyimpan nilai terakhir (Rp ${g.costPrice.toLocaleString('id-ID')}) sebagai HPP manual agar laporan margin tidak mendadak nol.\n\nLanjutkan hapus grup?`
+      : `Hapus grup modal bahan "${g.name}"?`;
+    if (!window.confirm(msg)) return;
+    await onDeleteGroup(g.id, true);
+    if (editingGroup?.id === g.id) handleResetForm();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex justify-center items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center border-b pb-3 mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Kelola Grup Modal Bahan (HPP Bersama)</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Ubah harga modal di sini sekali saja, maka semua produk yang tertaut otomatis ikut ter-update.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+          <form onSubmit={handleSubmit} className="p-4 border border-indigo-200 rounded-lg bg-indigo-50/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold text-sm text-indigo-900">
+                {editingGroup ? `Edit Grup: ${editingGroup.name}` : 'Tambah Grup Modal Bahan Baru'}
+              </h4>
+              {editingGroup && (
+                <button type="button" onClick={handleResetForm} className="text-xs text-gray-600 hover:underline">
+                  Batal Edit
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-700">Nama Bahan / Grup</label>
+                <input
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Contoh: Flexy 280gr"
+                  className="mt-1 w-full p-2 border rounded-md bg-white text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700">Tipe Satuan</label>
+                <select
+                  value={unitType}
+                  onChange={e => setUnitType(e.target.value as 'Per Luas' | 'Per Buah')}
+                  className="mt-1 w-full p-2 border rounded-md bg-white text-sm"
+                >
+                  <option value="Per Luas">Per Luas (m²)</option>
+                  <option value="Per Buah">Per Buah (pcs)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700">
+                  Est. HPP / {unitType === 'Per Luas' ? 'm²' : 'pcs'} (Rp)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={costPrice}
+                  onChange={e => setCostPrice(e.target.value)}
+                  placeholder="8500"
+                  className="mt-1 w-full p-2 border rounded-md bg-white text-sm"
+                  required
+                />
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-gray-700">Catatan (Opsional)</label>
+                <input
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Misal: Bahan + tinta standar"
+                  className="mt-1 w-full p-2 border rounded-md bg-white text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="bg-indigo-600 text-white px-5 py-2 rounded-md text-sm font-semibold hover:bg-indigo-700 disabled:bg-indigo-300 whitespace-nowrap"
+              >
+                {isSaving ? 'Menyimpan...' : editingGroup ? 'Update Grup' : '+ Simpan Grup'}
+              </button>
+            </div>
+          </form>
+
+          <div className="border rounded-lg overflow-hidden">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="py-2.5 px-3 text-left text-xs font-semibold text-gray-600 uppercase">Nama Grup Bahan</th>
+                  <th className="py-2.5 px-3 text-left text-xs font-semibold text-gray-600 uppercase">Satuan</th>
+                  <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600 uppercase">Est. HPP</th>
+                  <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600 uppercase">Produk Terhubung</th>
+                  <th className="py-2.5 px-3 text-right text-xs font-semibold text-gray-600 uppercase">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {groups.map(g => {
+                  const count = usageCountByGroup.get(g.id) || 0;
+                  return (
+                    <tr key={g.id} className="hover:bg-gray-50">
+                      <td className="py-2.5 px-3">
+                        <p className="font-semibold text-gray-800">{g.name}</p>
+                        {g.notes && <p className="text-[11px] text-gray-500">{g.notes}</p>}
+                      </td>
+                      <td className="py-2.5 px-3 text-xs text-gray-600">{g.unitType}</td>
+                      <td className="py-2.5 px-3 text-right font-bold text-amber-700">
+                        {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(g.costPrice)}/{g.unitType === 'Per Luas' ? 'm²' : 'pcs'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-xs">
+                        <span className={`px-2 py-0.5 rounded-full font-semibold ${count > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-500'}`}>
+                          {count} produk
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap space-x-1.5">
+                        <button type="button" onClick={() => handleStartEdit(g)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit Grup">
+                          <PencilIcon className="h-4 w-4" />
+                        </button>
+                        <button type="button" onClick={() => handleDelete(g)} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Hapus Grup">
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {groups.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-500 text-sm">
+                      Belum ada Grup Modal Bahan. Buat grup pertama di form atas (misal: <strong>Flexy 280gr</strong>).
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Modal Atur HPP Massal ---
+const BulkCostAssignModal: React.FC<{
+  show: boolean;
+  onClose: () => void;
+  products: ProductData[];
+  categories: CategoryData[];
+  productCostMetadata: Record<number, ProductCostMeta>;
+  costGroups: ProductCostGroup[];
+  onBulkApply: (updates: Array<{ productId: number; mode: 'group' | 'manual' | 'clear'; costGroupId?: string; costPrice?: number }>) => Promise<void>;
+  onOpenCostGroupsModal: () => void;
+}> = ({ show, onClose, products, categories, productCostMetadata, costGroups, onBulkApply, onOpenCostGroupsModal }) => {
+  const [searchText, setSearchText] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unset' | 'set' | 'group' | 'manual'>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [applyMode, setApplyMode] = useState<'group' | 'manual' | 'clear'>(costGroups.length > 0 ? 'group' : 'manual');
+  const [targetGroupId, setTargetGroupId] = useState<string>(costGroups[0]?.id || '');
+  const [manualCostInput, setManualCostInput] = useState('');
+  const [isApplying, setIsApplying] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+
+  useEffect(() => {
+    if (show) {
+      setSuccessMsg('');
+      if (costGroups.length > 0 && !costGroups.some(g => g.id === targetGroupId)) {
+        setTargetGroupId(costGroups[0].id);
+      }
+      if (costGroups.length === 0 && applyMode === 'group') {
+        setApplyMode('manual');
+      }
+    } else {
+      setSelectedIds(new Set());
+      setSearchText('');
+      setCategoryFilter('ALL');
+      setStatusFilter('all');
+      setSuccessMsg('');
+    }
+  }, [show, costGroups]);
+
+  const categoryUnitMap = useMemo(
+    () => new Map<string, 'Per Luas' | 'Per Buah'>(categories.map(c => [c.name, c.unitType])),
+    [categories]
+  );
+
+  const costGroupsMap = useMemo(
+    () => new Map<string, ProductCostGroup>(costGroups.map(g => [g.id, g])),
+    [costGroups]
+  );
+
+  const filteredProducts = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return products.filter(p => {
+      if (categoryFilter !== 'ALL' && p.category !== categoryFilter) return false;
+      if (q && !p.name.toLowerCase().includes(q) && !p.category.toLowerCase().includes(q)) return false;
+
+      const eff = resolveEffectiveProductCost(p.id, productCostMetadata, costGroupsMap);
+      if (statusFilter === 'unset' && eff.source !== 'none') return false;
+      if (statusFilter === 'set' && eff.source === 'none') return false;
+      if (statusFilter === 'group' && eff.source !== 'group') return false;
+      if (statusFilter === 'manual' && eff.source !== 'manual') return false;
+      return true;
+    });
+  }, [products, searchText, categoryFilter, statusFilter, productCostMetadata, costGroupsMap]);
+
+  const selectedGroupObj = costGroupsMap.get(targetGroupId);
+  const mismatchedSelectedCount = useMemo(() => {
+    if (applyMode !== 'group' || !selectedGroupObj) return 0;
+    let count = 0;
+    selectedIds.forEach(pid => {
+      const prod = products.find(p => p.id === pid);
+      if (prod) {
+        const uType = categoryUnitMap.get(prod.category) || 'Per Buah';
+        if (uType !== selectedGroupObj.unitType) count += 1;
+      }
+    });
+    return count;
+  }, [applyMode, selectedGroupObj, selectedIds, products, categoryUnitMap]);
+
+  if (!show) return null;
+
+  const toggleOne = (id: number) => {
+    setSuccessMsg('');
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllVisible = () => {
+    setSuccessMsg('');
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      filteredProducts.forEach(p => next.add(p.id));
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleApply = async () => {
+    if (selectedIds.size === 0) {
+      alert('Pilih minimal 1 produk terlebih dahulu.');
+      return;
+    }
+    if (applyMode === 'group' && !targetGroupId) {
+      alert('Pilih Grup Modal Bahan terlebih dahulu.');
+      return;
+    }
+    if (applyMode === 'manual') {
+      const num = Number(manualCostInput);
+      if (!num || num <= 0) {
+        alert('Masukkan nominal HPP manual lebih dari 0.');
+        return;
+      }
+    }
+    if (applyMode === 'clear' && !window.confirm(`Kosongkan HPP pada ${selectedIds.size} produk terpilih?`)) {
+      return;
+    }
+
+    setIsApplying(true);
+    try {
+      const updates = Array.from(selectedIds).map(productId => ({
+        productId,
+        mode: applyMode,
+        ...(applyMode === 'group' ? { costGroupId: targetGroupId } : {}),
+        ...(applyMode === 'manual' ? { costPrice: Number(manualCostInput) } : {}),
+      }));
+      await onBulkApply(updates);
+      setSuccessMsg(`Berhasil menerapkan perubahan HPP ke ${selectedIds.size} produk.`);
+      setSelectedIds(new Set());
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-4xl max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center border-b pb-3 mb-4">
+          <div>
+            <h3 className="text-xl font-bold text-gray-800">Atur HPP Massal Produk</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Cari varian sejenis (misal &ldquo;flexy 280&rdquo;), centang sekaligus, lalu tautkan ke 1 Grup Bahan atau isi nominal HPP.</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <MagnifyingGlassIcon className="h-4 w-4 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              placeholder="Cari produk (misal: flexy 280)..."
+              className="w-full pl-9 pr-3 py-2 border rounded-md text-sm"
+            />
+          </div>
+          <select
+            value={categoryFilter}
+            onChange={e => setCategoryFilter(e.target.value)}
+            className="p-2 border rounded-md text-sm bg-white"
+          >
+            <option value="ALL">Semua Kategori</option>
+            {categories.map(c => (
+              <option key={c.id} value={c.name}>{c.name} ({c.unitType})</option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value as any)}
+            className="p-2 border rounded-md text-sm bg-white"
+          >
+            <option value="all">Semua Status HPP</option>
+            <option value="unset">Belum Ada HPP</option>
+            <option value="set">Sudah Ada HPP</option>
+            <option value="group">Pakai Grup Bahan</option>
+            <option value="manual">Pakai HPP Manual</option>
+          </select>
+        </div>
+
+        {/* Selection Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-2">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={handleSelectAllVisible} className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 rounded font-semibold text-gray-700">
+              Pilih Semua yang Tampil ({filteredProducts.length})
+            </button>
+            {selectedIds.size > 0 && (
+              <button type="button" onClick={handleClearSelection} className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-600">
+                Batal Pilih
+              </button>
+            )}
+          </div>
+          <span className="font-semibold text-pink-700">
+            {selectedIds.size} produk dipilih
+          </span>
+        </div>
+
+        {/* Product Checklist */}
+        <div className="flex-1 overflow-y-auto border rounded-lg mb-4 min-h-[180px]">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th className="py-2 px-3 w-10 text-center">✓</th>
+                <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase">Nama Produk</th>
+                <th className="py-2 px-3 text-left text-xs font-semibold text-gray-600 uppercase">Kategori</th>
+                <th className="py-2 px-3 text-right text-xs font-semibold text-gray-600 uppercase">HPP Saat Ini</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredProducts.map(p => {
+                const isChecked = selectedIds.has(p.id);
+                const eff = resolveEffectiveProductCost(p.id, productCostMetadata, costGroupsMap);
+                const uType = categoryUnitMap.get(p.category) || 'Per Buah';
+                const uLabel = uType === 'Per Luas' ? 'm²' : 'pcs';
+                return (
+                  <tr
+                    key={p.id}
+                    onClick={() => toggleOne(p.id)}
+                    className={`cursor-pointer hover:bg-pink-50/50 ${isChecked ? 'bg-pink-50' : ''}`}
+                  >
+                    <td className="py-2 px-3 text-center" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleOne(p.id)}
+                        className="h-4 w-4 text-pink-600 rounded"
+                      />
+                    </td>
+                    <td className="py-2 px-3 font-medium text-gray-800">{p.name}</td>
+                    <td className="py-2 px-3 text-xs text-gray-600">{p.category} ({uLabel})</td>
+                    <td className="py-2 px-3 text-right text-xs">
+                      {eff.source === 'group' && eff.group ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="font-semibold text-amber-700">Rp {eff.costPrice.toLocaleString('id-ID')}/{uLabel}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium">{eff.group.name}</span>
+                        </span>
+                      ) : eff.source === 'manual' ? (
+                        <span className="font-semibold text-amber-700">Rp {eff.costPrice.toLocaleString('id-ID')}/{uLabel} <span className="text-gray-400 font-normal">(Manual)</span></span>
+                      ) : (
+                        <span className="text-gray-400 italic">Belum diisi</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredProducts.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-gray-500 text-sm">Tidak ada produk yang cocok dengan filter.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {successMsg && (
+          <div className="mb-3 px-3 py-2 rounded-md bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 font-medium">
+            {successMsg}
+          </div>
+        )}
+
+        {/* Action Panel */}
+        <div className="p-4 border rounded-lg bg-gray-50 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setApplyMode('group')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${applyMode === 'group' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300'}`}
+              >
+                Tautkan ke Grup Bahan
+              </button>
+              <button
+                type="button"
+                onClick={() => setApplyMode('manual')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${applyMode === 'manual' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-700 border-gray-300'}`}
+              >
+                Isi HPP Manual Sekaligus
+              </button>
+              <button
+                type="button"
+                onClick={() => setApplyMode('clear')}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold border ${applyMode === 'clear' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-700 border-gray-300'}`}
+              >
+                Kosongkan HPP
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenCostGroupsModal}
+              className="text-xs font-semibold text-indigo-700 hover:underline"
+            >
+              + Kelola / Buat Grup Bahan
+            </button>
+          </div>
+
+          {applyMode === 'group' && (
+            <div className="space-y-1.5">
+              {costGroups.length > 0 ? (
+                <select
+                  value={targetGroupId}
+                  onChange={e => setTargetGroupId(e.target.value)}
+                  className="w-full p-2 border rounded-md bg-white text-sm"
+                >
+                  <option value="">-- Pilih Grup Modal Bahan --</option>
+                  {costGroups.map(g => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} — Rp {g.costPrice.toLocaleString('id-ID')}/{g.unitType === 'Per Luas' ? 'm²' : 'pcs'} ({g.unitType})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2">
+                  Belum ada Grup Modal Bahan. Klik <strong>&ldquo;+ Kelola / Buat Grup Bahan&rdquo;</strong> di kanan atas untuk membuat grup terlebih dahulu.
+                </p>
+              )}
+              {mismatchedSelectedCount > 0 && selectedGroupObj && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                  Perhatian: Ada <strong>{mismatchedSelectedCount} produk terpilih</strong> yang tipe satuannya berbeda dengan satuan grup <strong>{selectedGroupObj.unitType}</strong>. Pastikan satuannya sudah benar sebelum menerapkan.
+                </p>
+              )}
+            </div>
+          )}
+
+          {applyMode === 'manual' && (
+            <input
+              type="number"
+              min="1"
+              value={manualCostInput}
+              onChange={e => setManualCostInput(e.target.value)}
+              placeholder="Masukkan nominal Est. HPP (Rp) per m² / pcs..."
+              className="w-full p-2 border rounded-md bg-white text-sm"
+            />
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300">
+              Tutup
+            </button>
+            <button
+              type="button"
+              onClick={handleApply}
+              disabled={isApplying || selectedIds.size === 0 || (applyMode === 'group' && costGroups.length === 0)}
+              className="px-5 py-2 rounded-lg text-sm font-bold bg-pink-600 text-white hover:bg-pink-700 disabled:bg-pink-300"
+            >
+              {isApplying ? 'Menerapkan...' : `Terapkan ke ${selectedIds.size} Produk`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Import/Export Modal ---
 const ImportExportModal: React.FC<{
   show: boolean;
   onClose: () => void;
   products: ProductData[];
+  productCostMetadata?: Record<number, ProductCostMeta>;
+  productCostGroups?: ProductCostGroup[];
   categories: CategoryData[];
   finishings: FinishingData[];
   customers: CustomerData[];
   suppliers: SupplierData[];
   employees: EmployeeData[];
-  onAddProduct: (newProduct: Omit<ProductData, 'id'>) => void;
+  onAddProduct: (newProduct: Omit<ProductData, 'id'>, costPrice?: number, costGroupId?: string) => void;
   onAddCategory: (newCategory: Omit<CategoryData, 'id'>) => void;
   onAddFinishing: (newFinishing: Omit<FinishingData, 'id'>) => void;
   onAddCustomer: (newCustomer: Omit<CustomerData, 'id' | 'joinDate'>) => void;
   onAddSupplier: (newSupplier: Omit<SupplierData, 'id'>) => void;
   onAddEmployee: (newEmployee: Omit<EmployeeData, 'id' | 'joinDate'>) => void;
-}> = ({ show, onClose, products, categories, finishings, customers, suppliers, employees, onAddProduct, onAddCategory, onAddFinishing, onAddCustomer, onAddSupplier, onAddEmployee }) => {
+}> = ({ show, onClose, products, productCostMetadata = {}, productCostGroups = [], categories, finishings, customers, suppliers, employees, onAddProduct, onAddCategory, onAddFinishing, onAddCustomer, onAddSupplier, onAddEmployee }) => {
     
     const [uploadedFile, setUploadedFile] = useState<File | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -170,7 +847,7 @@ const ImportExportModal: React.FC<{
     
     const handleDownloadTemplate = () => {
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ nama: "Contoh Produk", kategori: "Cetak Kertas", harga_end_customer: 50000, harga_retail: 45000, harga_grosir: 42000, harga_reseller: 40000, harga_corporate: 38000 }]), "Produk & Layanan");
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ nama: "Contoh Produk", kategori: "Cetak Kertas", harga_end_customer: 50000, harga_retail: 45000, harga_grosir: 42000, harga_reseller: 40000, harga_corporate: 38000, hpp_modal: 25000 }]), "Produk & Layanan");
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ nama: "Cetak Kertas", tipe_satuan: "Per Buah" }]), "Kategori");
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ nama: "Laminasi Doff", harga: 5000 }]), "Finishing");
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ nama: "Pelanggan Baru", kontak: "08123456789", level: "End Customer" }]), "Pelanggan");
@@ -182,7 +859,10 @@ const ImportExportModal: React.FC<{
     const handleExportData = () => {
         try {
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(products.map(p => ({ nama: p.name, kategori: p.category, harga_end_customer: p.price.endCustomer, harga_retail: p.price.retail, harga_grosir: p.price.grosir, harga_reseller: p.price.reseller, harga_corporate: p.price.corporate }))), "Produk & Layanan");
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(products.map(p => {
+                const eff = resolveEffectiveProductCost(p.id, productCostMetadata, productCostGroups);
+                return { nama: p.name, kategori: p.category, harga_end_customer: p.price.endCustomer, harga_retail: p.price.retail, harga_grosir: p.price.grosir, harga_reseller: p.price.reseller, harga_corporate: p.price.corporate, hpp_modal: eff.costPrice || 0, grup_hpp: eff.group?.name || '' };
+            })), "Produk & Layanan");
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(categories.map(c => ({ nama: c.name, tipe_satuan: c.unitType }))), "Kategori");
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(finishings.map(f => ({ nama: f.name, harga: f.price }))), "Finishing");
             XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(customers.map(c => ({ nama: c.name, kontak: c.contact, level: c.level }))), "Pelanggan");
@@ -211,7 +891,7 @@ const ImportExportModal: React.FC<{
                     customers: Omit<CustomerData, 'id'|'joinDate'>[],
                     suppliers: Omit<SupplierData, 'id'>[],
                     employees: Omit<EmployeeData, 'id'|'joinDate'>[],
-                    products: Omit<ProductData, 'id'>[]
+                    products: { data: Omit<ProductData, 'id'>; costPrice?: number }[]
                 } = { categories: [], finishings: [], customers: [], suppliers: [], employees: [], products: [] };
 
                 const failedProducts: string[] = [];
@@ -253,7 +933,9 @@ const ImportExportModal: React.FC<{
                         if (!rowName || !row.kategori) return;
 
                         const nameStr = rowName.toString().trim().toLowerCase();
-                        const productExists = allProducts.some(p => p.name.trim().toLowerCase() === nameStr);
+                        const productExists =
+                            allProducts.some(p => p.name.trim().toLowerCase() === nameStr) ||
+                            newItems.products.some(p => p.data.name.trim().toLowerCase() === nameStr);
                         
                         if (!productExists) {
                             const categoryStr = row.kategori.toString().trim().toLowerCase();
@@ -261,12 +943,15 @@ const ImportExportModal: React.FC<{
                             
                             if (categoryExists) {
                                 newItems.products.push({
-                                    name: row.nama, category: row.kategori,
-                                    price: { 
-                                        endCustomer: Number(row.harga_end_customer) || 0, retail: Number(row.harga_retail) || 0,
-                                        grosir: Number(row.harga_grosir) || 0, reseller: Number(row.harga_reseller) || 0,
-                                        corporate: Number(row.harga_corporate) || 0
-                                    }
+                                    data: {
+                                        name: row.nama, category: row.kategori,
+                                        price: { 
+                                            endCustomer: Number(row.harga_end_customer) || 0, retail: Number(row.harga_retail) || 0,
+                                            grosir: Number(row.harga_grosir) || 0, reseller: Number(row.harga_reseller) || 0,
+                                            corporate: Number(row.harga_corporate) || 0
+                                        }
+                                    },
+                                    costPrice: Math.max(0, Number(row.hpp_modal) || 0),
                                 });
                             } else {
                                 failedProducts.push(row.nama);
@@ -281,7 +966,7 @@ const ImportExportModal: React.FC<{
                 if (newItems.customers.length > 0) { newItems.customers.forEach(onAddCustomer); summaryParts.push(`${newItems.customers.length} pelanggan baru`); }
                 if (newItems.suppliers.length > 0) { newItems.suppliers.forEach(onAddSupplier); summaryParts.push(`${newItems.suppliers.length} supplier baru`); }
                 if (newItems.employees.length > 0) { newItems.employees.forEach(onAddEmployee); summaryParts.push(`${newItems.employees.length} karyawan baru`); }
-                if (newItems.products.length > 0) { newItems.products.forEach(onAddProduct); summaryParts.push(`${newItems.products.length} produk baru`); }
+                if (newItems.products.length > 0) { newItems.products.forEach(item => onAddProduct(item.data, item.costPrice)); summaryParts.push(`${newItems.products.length} produk baru`); }
 
                 let alertMessage = `Impor Selesai!\nRingkasan: ${summaryParts.join(', ') || "Tidak ada data baru yang ditambahkan."}`;
                 if (failedProducts.length > 0) {
@@ -368,8 +1053,9 @@ const ImportExportModal: React.FC<{
 
 
 const MasterData: React.FC<MasterDataProps> = ({ 
-    products, categories, finishings, customers, suppliers, employees, menuPermissions, userLevel,
+    products, productCostMetadata = {}, productCostGroups = [], categories, finishings, customers, suppliers, employees, menuPermissions, userLevel,
     onAddProduct, onUpdateProduct, onDeleteProduct,
+    onSaveProductCostGroup, onDeleteProductCostGroup, onBulkUpdateProductCosts,
     onAddCategory, onUpdateCategory, onDeleteCategory,
     onAddFinishing, onUpdateFinishing, onDeleteFinishing,
     onAddCustomer, onUpdateCustomer, onDeleteCustomer,
@@ -381,6 +1067,8 @@ const MasterData: React.FC<MasterDataProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [isImportExportModalOpen, setIsImportExportModalOpen] = useState(false);
+  const [isCostGroupsModalOpen, setIsCostGroupsModalOpen] = useState(false);
+  const [isBulkCostModalOpen, setIsBulkCostModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -422,23 +1110,25 @@ const MasterData: React.FC<MasterDataProps> = ({
   const handleSaveData = (data: any) => {
     const isEditing = Boolean(editingItem && editingItem.id !== undefined);
     switch (activeTab) {
-      case 'products':
+      case 'products': {
+        const productPayload = {
+          name: data.name,
+          category: data.category,
+          price: {
+            endCustomer: Number(data.price.endCustomer),
+            retail: Number(data.price.retail),
+            grosir: Number(data.price.grosir),
+            reseller: Number(data.price.reseller),
+            corporate: Number(data.price.corporate),
+          }
+        };
         if (isEditing) {
-          onUpdateProduct({ ...editingItem, ...data });
+          onUpdateProduct({ ...editingItem, ...productPayload }, data.costPrice, data.costGroupId);
         } else {
-          onAddProduct({
-            name: data.name,
-            category: data.category,
-            price: {
-              endCustomer: Number(data.price.endCustomer),
-              retail: Number(data.price.retail),
-              grosir: Number(data.price.grosir),
-              reseller: Number(data.price.reseller),
-              corporate: Number(data.price.corporate),
-            }
-          });
+          onAddProduct(productPayload, data.costPrice, data.costGroupId);
         }
         break;
+      }
       case 'categories':
         if (isEditing) {
           onUpdateCategory({ ...editingItem, name: data.name, unitType: data.unitType });
@@ -525,7 +1215,7 @@ const MasterData: React.FC<MasterDataProps> = ({
 
     switch (activeTab) {
         case 'products':
-            return <ProductForm key={modalFormKey} categories={categories} initialData={editingItem} onSubmit={handleSaveData} />;
+            return <ProductForm key={modalFormKey} categories={categories} costGroups={productCostGroups} initialData={editingItem} initialMeta={editingItem?.id ? productCostMetadata[editingItem.id] : undefined} onSubmit={handleSaveData} />;
         case 'categories':
             return (
                 <form key={modalFormKey} onSubmit={handleSubmit} className="space-y-3">
@@ -722,8 +1412,37 @@ const MasterData: React.FC<MasterDataProps> = ({
     switch (activeTab) {
       case 'products':
         return (
-            <Table headers={[...( ["Nama Layanan/Produk", "Kategori", "Harga (EC/R/G/S/C)"] ), ...(showActions ? ["Aksi"] : [])]}>
-            {(paginatedData as ProductData[]).map((product) => (<tr key={product.id} className="hover:bg-gray-50"><Td className="font-medium text-gray-900">{product.name}</Td><Td className="text-gray-500">{product.category}</Td><Td className="text-gray-500 text-xs">{`${product.price.endCustomer/1000}k / ${product.price.retail/1000}k / ${product.price.grosir/1000}k / ${product.price.reseller/1000}k / ${product.price.corporate/1000}k`}</Td>{renderActionButtons(product, product.name)}</tr>))}
+            <Table headers={[...( ["Nama Layanan/Produk", "Kategori", "Harga (EC/R/G/S/C)", "Est. HPP"] ), ...(showActions ? ["Aksi"] : [])]}>
+            {(paginatedData as ProductData[]).map((product) => {
+                const effective = resolveEffectiveProductCost(product.id, productCostMetadata, productCostGroups);
+                const catUnit = categories.find(c => c.name === product.category)?.unitType === 'Per Luas' ? 'm²' : 'pcs';
+                return (
+                    <tr key={product.id} className="hover:bg-gray-50">
+                        <Td className="font-medium text-gray-900">{product.name}</Td>
+                        <Td className="text-gray-500">{product.category}</Td>
+                        <Td className="text-gray-500 text-xs">{`${product.price.endCustomer/1000}k / ${product.price.retail/1000}k / ${product.price.grosir/1000}k / ${product.price.reseller/1000}k / ${product.price.corporate/1000}k`}</Td>
+                        <Td className="text-xs">
+                            {effective.costPrice > 0 ? (
+                                <div>
+                                    <span className="font-semibold text-amber-700">
+                                        {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(effective.costPrice)}/{catUnit}
+                                    </span>
+                                    {effective.source === 'group' && effective.group ? (
+                                        <span className="ml-1.5 inline-block px-1.5 py-0.5 text-[10px] rounded bg-indigo-50 text-indigo-700 font-medium">
+                                            Grup: {effective.group.name}
+                                        </span>
+                                    ) : (
+                                        <span className="ml-1 text-[10px] text-gray-400">(Manual)</span>
+                                    )}
+                                </div>
+                            ) : (
+                                <span className="text-gray-400 italic">Belum diisi</span>
+                            )}
+                        </Td>
+                        {renderActionButtons(product, product.name)}
+                    </tr>
+                );
+            })}
             </Table>
         );
       case 'categories':
@@ -816,7 +1535,23 @@ const MasterData: React.FC<MasterDataProps> = ({
     <div className="bg-white p-6 rounded-xl shadow-md flex flex-col">
       <div className="flex flex-wrap gap-2 justify-between items-center mb-4">
         <h2 className="text-xl font-bold">Manajemen Data Master</h2>
-        <div className="flex space-x-2">
+        <div className="flex flex-wrap gap-2">
+            {activeTab === 'products' && canEdit && onSaveProductCostGroup && onDeleteProductCostGroup && (
+              <button
+                onClick={() => setIsCostGroupsModalOpen(true)}
+                className="bg-indigo-600 text-white px-3.5 py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 transition-colors"
+              >
+                Grup Modal Bahan{productCostGroups.length > 0 ? ` (${productCostGroups.length})` : ''}
+              </button>
+            )}
+            {activeTab === 'products' && canEdit && onBulkUpdateProductCosts && (
+              <button
+                onClick={() => setIsBulkCostModalOpen(true)}
+                className="bg-amber-600 text-white px-3.5 py-2 rounded-lg font-semibold text-sm hover:bg-amber-700 transition-colors"
+              >
+                Atur HPP Massal
+              </button>
+            )}
             <button onClick={() => setIsImportExportModalOpen(true)} className="bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-gray-700 transition-colors">Impor dan Ekspor Data</button>
             <button onClick={handleOpenAddModal} className="bg-pink-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-pink-700 transition-colors">+ Tambah Baru</button>
         </div>
@@ -854,10 +1589,36 @@ const MasterData: React.FC<MasterDataProps> = ({
         {renderModalContent()}
       </Modal>
 
+      {onBulkUpdateProductCosts && (
+        <BulkCostAssignModal
+          show={isBulkCostModalOpen}
+          onClose={() => setIsBulkCostModalOpen(false)}
+          products={products}
+          categories={categories}
+          productCostMetadata={productCostMetadata}
+          costGroups={productCostGroups}
+          onBulkApply={onBulkUpdateProductCosts}
+          onOpenCostGroupsModal={() => setIsCostGroupsModalOpen(true)}
+        />
+      )}
+
+      {onSaveProductCostGroup && onDeleteProductCostGroup && (
+        <CostGroupsModal
+          show={isCostGroupsModalOpen}
+          onClose={() => setIsCostGroupsModalOpen(false)}
+          groups={productCostGroups}
+          productCostMetadata={productCostMetadata}
+          onSaveGroup={onSaveProductCostGroup}
+          onDeleteGroup={onDeleteProductCostGroup}
+        />
+      )}
+
       <ImportExportModal
         show={isImportExportModalOpen}
         onClose={() => setIsImportExportModalOpen(false)}
         products={products}
+        productCostMetadata={productCostMetadata}
+        productCostGroups={productCostGroups}
         categories={categories}
         finishings={finishings}
         customers={customers}

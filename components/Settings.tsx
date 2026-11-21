@@ -283,11 +283,16 @@ const MenuAccessManager: React.FC<{
 
     return (
         <div className="mt-8 border-t pt-6">
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-gray-700">Pengaturan Akses Menu per Level</h3>
+            <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
+                <div>
+                    <h3 className="text-lg font-bold text-gray-700">Pengaturan Akses Menu per Level</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                        Anda dapat mengatur akses hingga ke level sub-tab. Misalnya untuk peran <strong>Office</strong>, Anda bisa mencentang hanya <strong>Owner Dashboard → Aset, Modal &amp; Hutang</strong> tanpa membuka akses tab gaji/bonus Owner, sementara <strong>Laporan → Neraca (Aset &amp; Hutang)</strong> bersifat baca-saja (Read-Only).
+                    </p>
+                </div>
                 <button
                     onClick={() => onSave(localPermissions)}
-                    className="bg-pink-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-pink-700 transition-colors"
+                    className="bg-pink-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-pink-700 transition-colors shrink-0"
                 >
                     Simpan Akses
                 </button>

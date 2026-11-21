@@ -3,6 +3,7 @@ import type React from 'react';
 export type MenuKey =
   | 'dashboard'
   | 'cashFlow'
+  | 'ownerFinance'
   | 'sales'
   | 'receivables'
   | 'expenses'
@@ -118,6 +119,10 @@ export interface OrderItemData {
   width: string;
   qty: number;
   customPrice?: number; // Field baru untuk harga kustom
+  unitPriceSnapshot?: number; // Snapshot harga bahan per satuan (m2 / pcs) saat order dibuat
+  finishingPriceSnapshot?: number; // Snapshot harga finishing per pcs saat order dibuat
+  lineTotalSnapshot?: number; // Snapshot subtotal item (sebelum pembulatan nota) saat order dibuat
+  priceLockedAt?: string; // ISO timestamp saat harga item dikunci
 }
 
 // Tipe data untuk order yang disimpan di halaman penjualan (sebelum diproses)
@@ -204,6 +209,23 @@ export interface InventoryCheckStatus {
   lastCheckedAt?: string;
   lastCheckedBy?: string;
   byCategory?: Partial<Record<InventoryCategory, InventoryTabCheckInfo>>;
+}
+
+export interface ProductCostGroup {
+  id: string;
+  name: string;
+  unitType: 'Per Luas' | 'Per Buah';
+  costPrice: number;
+  notes?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface ProductCostMeta {
+  costPrice: number;
+  costGroupId?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // --- Payroll Types ---
@@ -345,6 +367,7 @@ export interface ExpenseMetadata {
   fundingAccountId?: string;
   fundingAccountName?: string;
   purchaseId?: string;
+  ownerTxId?: string;
   notes?: string;
   createdBy?: string;
 }
@@ -533,6 +556,159 @@ export interface CashFlowProps {
   onSaveAccountBalanceMeta: (methodId: string, meta: AccountBalanceMeta) => Promise<void>;
 }
 
+// --- Keuangan Owner (Paket 1+) ---
+export type OwnerAllocationBucket = 'reserve' | 'equipment' | 'bonus' | 'buffer';
+
+export interface OwnerAllocationPercents {
+  reserve: number;
+  equipment: number;
+  bonus: number;
+  buffer: number;
+}
+
+export interface OwnerFinanceConfig {
+  ownerName: string;
+  monthlySalary: number;
+  salaryPayDay: number;
+  allocationPercents: OwnerAllocationPercents;
+  lossCarryForwardMode: 'carry_forward' | 'absorb_reserve';
+  startPeriod?: string;
+}
+
+export type OwnerTransactionType =
+  | 'salary_paid'
+  | 'salary_accrual'
+  | 'bonus_payout'
+  | 'prive'
+  | 'reserve_usage';
+
+export interface OwnerTransaction {
+  id: string;
+  type: OwnerTransactionType;
+  bucket?: OwnerAllocationBucket;
+  month: string;
+  date: string;
+  amount: number;
+  fundingSource?: ExpenseFundingSource;
+  fundingAccountId?: string;
+  fundingAccountName?: string;
+  linkedExpenseId?: number;
+  linkedTransferId?: string;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface OwnerMonthlyClosing {
+  id: string;
+  month: string; // YYYY-MM
+  closedAt: string;
+  closedBy?: string;
+  accrualSales: number;
+  totalAccrualCosts: number;
+  rawProfit: number;
+  priorLossApplied: number;
+  distributableProfit: number;
+  lossHandledMode: 'none' | 'carry_forward' | 'absorb_reserve';
+  absorbedFromReserve: number;
+  percents: OwnerAllocationPercents;
+  allocations: {
+    reserve: number;
+    equipment: number;
+    bonus: number;
+    buffer: number;
+  };
+  cashNetInMonth: number;
+  notes?: string;
+}
+
+export interface OwnerFinanceProps {
+  config: OwnerFinanceConfig;
+  transactions: OwnerTransaction[];
+  monthlyClosings: OwnerMonthlyClosing[];
+  allOrders: SavedOrder[];
+  receivables: ReceivableItem[];
+  expenses: ExpenseItem[];
+  expenseMetadata: Record<number, ExpenseMetadata>;
+  purchases: PurchaseRecord[];
+  supplierBills: SupplierBill[];
+  bankInstallments: BankInstallment[];
+  privateExpenses: PrivateExpenseItem[];
+  paymentMethods: PaymentMethod[];
+  cashDrawerState: CashDrawerState;
+  cashDrawerLogs: CashDrawerLog[];
+  cashTransfers: CashTransferRecord[];
+  accountBalancesMeta: Record<string, AccountBalanceMeta>;
+  payrollRecords: PayrollRecord[];
+  assets: AssetItem[];
+  debts: DebtItem[];
+  suppliers: SupplierData[];
+  legacyReceivables: LegacyReceivable[];
+  menuPermissions: string[];
+  storeInfo?: StoreInfo;
+  onSaveConfig: (nextConfig: OwnerFinanceConfig) => Promise<void>;
+  onPaySalary: (payload: {
+    month: string;
+    date: string;
+    amount: number;
+    fundingSource: ExpenseFundingSource;
+    fundingAccountId?: string;
+    fundingAccountName?: string;
+    notes?: string;
+  }) => Promise<boolean>;
+  onAccrueSalary: (payload: {
+    month: string;
+    date: string;
+    amount: number;
+    notes?: string;
+  }) => Promise<boolean>;
+  onCloseMonth: (closing: Omit<OwnerMonthlyClosing, 'id' | 'closedAt' | 'closedBy'>) => Promise<boolean>;
+  onDeleteMonthlyClosing: (closingId: string) => Promise<void>;
+  onPayoutBonus: (payload: {
+    month: string;
+    date: string;
+    amount: number;
+    fundingSource: ExpenseFundingSource;
+    fundingAccountId?: string;
+    fundingAccountName?: string;
+    notes?: string;
+  }) => Promise<boolean>;
+  onWithdrawPrive: (payload: {
+    month: string;
+    date: string;
+    amount: number;
+    fundingSource: ExpenseFundingSource;
+    fundingAccountId?: string;
+    fundingAccountName?: string;
+    notes?: string;
+  }) => Promise<boolean>;
+  onUseAllocationBucket: (payload: {
+    bucket: Exclude<OwnerAllocationBucket, 'bonus'>;
+    month: string;
+    date: string;
+    amount: number;
+    recordOperationalExpense: boolean;
+    expenseCategory?: string;
+    expenseName?: string;
+    fundingSource?: ExpenseFundingSource;
+    fundingAccountId?: string;
+    fundingAccountName?: string;
+    notes?: string;
+    addFixedAsset?: {
+      name: string;
+      value: number;
+    };
+  }) => Promise<boolean>;
+  onDeleteTransaction: (txId: string) => Promise<void>;
+  onAddCashTransfer: (payload: Omit<CashTransferRecord, 'id' | 'timestamp' | 'createdBy'>) => Promise<void>;
+  onAddAsset: (data: Omit<AssetItem, 'id'>) => Promise<void> | void;
+  onUpdateAsset: (data: AssetItem) => Promise<void> | void;
+  onDeleteAsset: (id: number) => Promise<void> | void;
+  onAddDebt: (data: Omit<DebtItem, 'id'>) => Promise<void> | void;
+  onUpdateDebt: (data: DebtItem) => Promise<void> | void;
+  onDeleteDebt: (id: number) => Promise<void> | void;
+}
+
 export interface ReportsProps {
   allOrders: SavedOrder[];
   expenses: ExpenseItem[];
@@ -556,6 +732,18 @@ export interface ReportsProps {
   assets: AssetItem[];
   debts: DebtItem[];
   notificationSettings: NotificationSettings;
+  storeInfo?: StoreInfo;
+  expenseMetadata?: Record<number, ExpenseMetadata>;
+  purchases?: PurchaseRecord[];
+  inventoryMetadata?: Record<number, InventoryItemMeta>;
+  inventoryCheckStatus?: InventoryCheckStatus;
+  productCostMetadata?: Record<number, ProductCostMeta>;
+  productCostGroups?: ProductCostGroup[];
+  cashDrawerState?: CashDrawerState;
+  accountBalancesMeta?: Record<string, AccountBalanceMeta>;
+  ownerFinanceConfig?: OwnerFinanceConfig;
+  ownerTransactions?: OwnerTransaction[];
+  ownerMonthlyClosings?: OwnerMonthlyClosing[];
   onAddLegacyMonthlyIncome: (data: Omit<LegacyMonthlyIncome, 'id'>) => void;
   onUpdateLegacyMonthlyIncome: (data: LegacyMonthlyIncome) => void;
   onDeleteLegacyMonthlyIncome: (id: number) => void;
@@ -565,12 +753,6 @@ export interface ReportsProps {
   onAddLegacyReceivable: (data: Omit<LegacyReceivable, 'id'>) => void;
   onUpdateLegacyReceivable: (data: LegacyReceivable) => void;
   onDeleteLegacyReceivable: (id: number) => void;
-  onAddAsset: (data: Omit<AssetItem, 'id'>) => void;
-  onUpdateAsset: (data: AssetItem) => void;
-  onDeleteAsset: (id: number) => void;
-  onAddDebt: (data: Omit<DebtItem, 'id'>) => void;
-  onUpdateDebt: (data: DebtItem) => void;
-  onDeleteDebt: (id: number) => void;
 }
 
 // --- Print Layout Template Generator Types ---

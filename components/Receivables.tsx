@@ -4,6 +4,13 @@ import { type ReceivableItem, type ProductionStatusDisplay, type PaymentStatus, 
 import { ShoppingCartIcon, WrenchScrewdriverIcon, CubeIcon, HomeIcon, CurrencyDollarIcon, CreditCardIcon, ChartBarIcon, EllipsisVerticalIcon, FilterIcon, ReceiptTaxIcon, PencilIcon, CheckIcon, BellIcon, ExclamationTriangleIcon, ClipboardIcon, CalendarDaysIcon, ArrowUpTrayIcon, TrashIcon } from './Icons';
 import { OWNER_HOLD_ACCOUNT_ID, OWNER_HOLD_ACCOUNT_NAME } from './cashFlowUtils';
 import Pagination from './Pagination';
+import {
+  calculateCanonicalOrderItemPrice,
+  calculateOrderTotalFromItems,
+  hasOrderItemSnapshot,
+  resolveLockedOrderItemTotals,
+  stampOrderItemsWithSnapshots,
+} from './reportUtils';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -113,64 +120,52 @@ const PaymentModal: React.FC<{
   const [paymentDate, setPaymentDate] = useState(getLocalDateString());
   const [paymentMethodId, setPaymentMethodId] = useState(paymentMethods[0]?.id || '');
   const [editedItems, setEditedItems] = useState<OrderItemData[] | null>(fullOrder?.orderItems || null);
+  const [hasModifiedItems, setHasModifiedItems] = useState(false);
 
-  const priceLevelMap: Record<CustomerData['level'], keyof ProductData['price']> = {
-    'End Customer': 'endCustomer',
-    'Retail': 'retail',
-    'Grosir': 'grosir',
-    'Reseller': 'reseller',
-    'Corporate': 'corporate'
-  };
-  
-  const calculateItemPrice = (item: OrderItemData): number => {
-    // If a custom price is set, use it immediately.
-    if (item.customPrice !== undefined && item.customPrice !== null) {
-        return item.customPrice;
+  const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const categoriesMap = useMemo(() => new Map(categories.map(c => [c.name, c])), [categories]);
+  const customersMap = useMemo(() => new Map(customers.map(c => [c.name, c])), [customers]);
+  const finishingsMap = useMemo(() => new Map(finishings.map(f => [f.name, f])), [finishings]);
+
+  useEffect(() => {
+    setEditedItems(fullOrder?.orderItems || null);
+    setHasModifiedItems(false);
+  }, [order.id, fullOrder]);
+
+  const lockedBreakdown = useMemo(() => {
+    if (!editedItems || editedItems.length === 0) {
+      return { itemTotals: [] as number[], unroundedSum: order.amount, masterTotal: order.amount, hasPriceDrift: false };
     }
+    return resolveLockedOrderItemTotals(
+      editedItems,
+      order.amount,
+      order.customer,
+      productsMap,
+      categoriesMap,
+      customersMap,
+      finishingsMap
+    );
+  }, [editedItems, order.amount, order.customer, productsMap, categoriesMap, customersMap, finishingsMap]);
 
-    const customerData = customers.find(c => c.name === order.customer);
-    const customerLevel = customerData ? customerData.level : 'End Customer';
-    const priceKey = priceLevelMap[customerLevel];
-    
-    if (!item.productId) return 0;
-    
-    const productInfo = products.find(p => p.id === item.productId);
-    const finishingInfo = finishings.find(f => f.name === item.finishing);
-    
-    if (!productInfo) return 0;
+  const displayedItemTotals = useMemo(() => {
+    if (!editedItems) return [] as number[];
+    if (!hasModifiedItems) return lockedBreakdown.itemTotals;
+    return editedItems.map(item =>
+      calculateCanonicalOrderItemPrice(item, order.customer, productsMap, categoriesMap, customersMap, finishingsMap)
+    );
+  }, [editedItems, hasModifiedItems, lockedBreakdown.itemTotals, order.customer, productsMap, categoriesMap, customersMap, finishingsMap]);
 
-    const categoryInfo = categories.find(c => c.name === productInfo.category);
-    const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-    let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-    const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-    let priceMultiplier = 1;
-    
-    if (isAreaBased) {
-        const length = parseFloat(item.length) || 0;
-        const width = parseFloat(item.width) || 0;
-        priceMultiplier = length * width;
-    }
-    
-    const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-    const itemFinishingTotal = finishingPrice * item.qty;
-    return itemMaterialTotal + itemFinishingTotal;
-  };
-  
   const currentTotalAmount = useMemo(() => {
-    if (!editedItems) return order.amount;
-    const total = editedItems.reduce((sum, item) => sum + calculateItemPrice(item), 0);
-    // Apply rounding
-    return Math.ceil(total / 500) * 500;
-  }, [editedItems, order.customer, products, finishings, customers, categories, order.amount]);
+    if (!editedItems || !hasModifiedItems) return order.amount;
+    return calculateOrderTotalFromItems(editedItems, order.customer, productsMap, categoriesMap, customersMap, finishingsMap);
+  }, [editedItems, hasModifiedItems, order.amount, order.customer, productsMap, categoriesMap, customersMap, finishingsMap]);
 
-  // Initialize discount on mount
+  // Initialize discount when opening modal / switching order
   useEffect(() => {
     if (order.discount && order.discount > 0) {
         setDiscountRp(order.discount.toString());
-        // Auto-calc percent based on current total
-        if (currentTotalAmount > 0) {
-             const pct = (order.discount / currentTotalAmount) * 100;
+        if (order.amount > 0) {
+             const pct = (order.discount / order.amount) * 100;
              setDiscountPercent(pct.toFixed(2));
         }
         setIsDiscountLocked(true); 
@@ -179,7 +174,7 @@ const PaymentModal: React.FC<{
         setDiscountPercent('');
         setIsDiscountLocked(false);
     }
-  }, [order, currentTotalAmount]);
+  }, [order]);
 
   const { totalPaid, totalSetelahDiskon, sisaTagihan } = useMemo(() => {
     const currentTotalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
@@ -228,20 +223,54 @@ const PaymentModal: React.FC<{
   };
 
   const handlePriceOverride = (itemId: number) => {
-      const item = editedItems?.find(i => i.id === itemId);
-      if (!item) return;
+      const idx = editedItems?.findIndex(i => i.id === itemId) ?? -1;
+      if (idx < 0 || !editedItems) return;
+      const item = editedItems[idx];
 
-      const currentPrice = calculateItemPrice(item);
+      const currentPrice = displayedItemTotals[idx] ?? 0;
       const newPriceStr = window.prompt(`Masukkan harga TOTAL baru untuk item ini:\n${item.description}`, currentPrice.toString());
 
       if (newPriceStr !== null) {
           const newPrice = parseFloat(newPriceStr);
           if (!isNaN(newPrice) && newPrice >= 0) {
-              setEditedItems(prev => prev!.map(i => i.id === itemId ? { ...i, customPrice: newPrice } : i));
+              const nowIso = new Date().toISOString();
+              setEditedItems(prev => prev!.map((it, itemIdx) => {
+                  if (it.id === itemId) {
+                      return { ...it, customPrice: newPrice, priceLockedAt: nowIso };
+                  }
+                  // Freeze sibling legacy items at their locked share so overriding 1 item never jumps sibling items to today's master prices
+                  if (!hasModifiedItems && !hasOrderItemSnapshot(it)) {
+                      return {
+                          ...it,
+                          lineTotalSnapshot: lockedBreakdown.itemTotals[itemIdx] ?? 0,
+                          priceLockedAt: nowIso,
+                      };
+                  }
+                  return it;
+              }));
+              setHasModifiedItems(true);
           } else {
               alert('Harga yang dimasukkan tidak valid.');
           }
       }
+  };
+
+  const handleRecalculateToMaster = () => {
+      if (!editedItems) return;
+      if (!window.confirm(`Hitung ulang seluruh item nota ${order.id} ke tarif Data Master saat ini (${formatCurrency(lockedBreakdown.masterTotal)})?`)) {
+          return;
+      }
+      const restamped = stampOrderItemsWithSnapshots(
+          editedItems,
+          order.customer,
+          productsMap,
+          categoriesMap,
+          customersMap,
+          finishingsMap,
+          { forceMaster: true }
+      );
+      setEditedItems(restamped);
+      setHasModifiedItems(true);
   };
 
 
@@ -267,12 +296,18 @@ const PaymentModal: React.FC<{
 
       const amountToRecord = Math.min(amountToPay, sisaTagihan);
 
-      onConfirmPayment(order.id, {
-        amount: amountToRecord,
-        date: paymentDate,
-        methodId: selectedMethod.id,
-        methodName: selectedMethod.name,
-      }, finalDiscount, editedItems || undefined, currentTotalAmount);
+      onConfirmPayment(
+        order.id,
+        {
+          amount: amountToRecord,
+          date: paymentDate,
+          methodId: selectedMethod.id,
+          methodName: selectedMethod.name,
+        },
+        finalDiscount,
+        hasModifiedItems && editedItems ? editedItems : undefined,
+        hasModifiedItems ? currentTotalAmount : undefined
+      );
   };
 
   return (
@@ -296,7 +331,25 @@ const PaymentModal: React.FC<{
                 </div>
 
                 <div>
-                    <h4 className="font-semibold text-gray-700 mb-2">Detail Pesanan</h4>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <h4 className="font-semibold text-gray-700">Detail Pesanan</h4>
+                    </div>
+                    {editedItems && !hasModifiedItems && lockedBreakdown.hasPriceDrift && (
+                        <div className="mb-3 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                                <strong>Harga Nota Lama Dikunci:</strong> Tarif master terbaru saat ini{' '}
+                                <strong>{formatCurrency(lockedBreakdown.masterTotal)}</strong>, tagihan tetap mengacu ke nota asli{' '}
+                                <strong>{formatCurrency(order.amount)}</strong>.
+                            </span>
+                            <button
+                                type="button"
+                                onClick={handleRecalculateToMaster}
+                                className="px-2.5 py-1 rounded bg-amber-600 text-white font-semibold hover:bg-amber-700 whitespace-nowrap"
+                            >
+                                Hitung Ulang ke Tarif Baru
+                            </button>
+                        </div>
+                    )}
                     <div className="overflow-x-auto border rounded-lg">
                         <table className="min-w-full text-sm">
                             <thead className="bg-gray-50">
@@ -310,7 +363,7 @@ const PaymentModal: React.FC<{
                                {editedItems ? (
                                    editedItems.map((item, index) => {
                                         const product = products.find(p => p.id === item.productId);
-                                        const itemTotal = calculateItemPrice(item);
+                                        const itemTotal = displayedItemTotals[index] ?? 0;
                                         return (
                                             <tr key={item.id}>
                                                 <td className="py-2 px-3">
@@ -1739,6 +1792,11 @@ const Receivables: React.FC<ReceivablesProps> = ({
     return map;
   }, [allOrders]);
 
+  const productsMap = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
+  const categoriesMap = useMemo(() => new Map(categories.map(c => [c.name, c])), [categories]);
+  const customersMap = useMemo(() => new Map(customers.map(c => [c.name, c])), [customers]);
+  const finishingsMap = useMemo(() => new Map(finishings.map(f => [f.name, f])), [finishings]);
+
   const allDisplayItems: DisplayReceivable[] = useMemo(() => {
     const processedItems: DisplayReceivable[] = receivables.map(r => ({ ...r, isUnprocessed: false, isLegacy: false }));
     const receivableIds = new Set(receivables.map(r => r.id));
@@ -2192,48 +2250,21 @@ const Receivables: React.FC<ReceivablesProps> = ({
     const subtotal = order.amount;
     const remainingAmount = subtotal - (order.discount || 0) - totalPaid;
 
-    const calculateItemPrice = (item: OrderItemData, customerName: string): { total: number, perUnit: number } => {
-        const customerData = customers.find(c => c.name === customerName);
-        const customerLevel = customerData ? customerData.level : 'End Customer';
-        const priceKey = priceLevelMap[customerLevel];
-        
-        if (!item.productId) return { total: 0, perUnit: 0 };
-        const productInfo = products.find(p => p.id === item.productId);
-        const finishingInfo = finishings.find(f => f.name === item.finishing);
-        if (!productInfo) return { total: 0, perUnit: 0 };
-
-        const categoryInfo = categories.find(c => c.name === productInfo.category);
-        const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-        let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-        let priceMultiplier = 1;
-        
-        if (isAreaBased) {
-            const length = parseFloat(item.length) || 0;
-            const width = parseFloat(item.width) || 0;
-            priceMultiplier = length * width;
-        }
-        
-        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-        const itemFinishingTotal = finishingPrice * item.qty;
-        const total = itemMaterialTotal + itemFinishingTotal;
-
-        const perUnit = item.qty > 0 ? total / item.qty : 0;
-        return { total, perUnit };
-    };
-    
-    const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer).total, 0);
-    const roundingDifference = subtotal - unroundedTotal;
+    const { itemTotals } = resolveLockedOrderItemTotals(
+        fullOrder.orderItems,
+        subtotal,
+        order.customer,
+        productsMap,
+        categoriesMap,
+        customersMap,
+        finishingsMap
+    );
 
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
         const category = categories.find(c => c.name === product?.category);
         const isArea = category?.unitType === 'Per Luas';
-        const prices = calculateItemPrice(item, order.customer);
-        
-        const isLastItem = index === fullOrder.orderItems.length - 1;
-        const displayTotal = isLastItem ? prices.total + roundingDifference : prices.total;
+        const displayTotal = itemTotals[index] ?? 0;
 
         const detailsParts = [];
         if (isArea && parseFloat(item.length) > 0 && parseFloat(item.width) > 0) {
@@ -2380,47 +2411,21 @@ const Receivables: React.FC<ReceivablesProps> = ({
     const totalPaid = order.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
     const remainingAmount = order.amount - (order.discount || 0) - totalPaid;
 
-    const calculateItemPrice = (item: OrderItemData, customerName: string): number => {
-        const customerData = customers.find(c => c.name === customerName);
-        const customerLevel = customerData ? customerData.level : 'End Customer';
-        const priceKey = priceLevelMap[customerLevel];
-        
-        if (!item.productId) return 0;
-        const productInfo = products.find(p => p.id === item.productId);
-        const finishingInfo = finishings.find(f => f.name === item.finishing);
-        if (!productInfo) return 0;
-
-        const categoryInfo = categories.find(c => c.name === productInfo.category);
-        const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-        let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-        let priceMultiplier = 1;
-        
-        if (isAreaBased) {
-            const length = parseFloat(item.length) || 0;
-            const width = parseFloat(item.width) || 0;
-            priceMultiplier = length * width;
-        }
-        
-        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-        const itemFinishingTotal = finishingPrice * item.qty;
-        return itemMaterialTotal + itemFinishingTotal;
-    };
-    
-    const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer), 0);
-    const roundingDifference = order.amount - unroundedTotal;
+    const { itemTotals } = resolveLockedOrderItemTotals(
+        fullOrder.orderItems,
+        order.amount,
+        order.customer,
+        productsMap,
+        categoriesMap,
+        customersMap,
+        finishingsMap
+    );
 
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
         const category = categories.find(c => c.name === product?.category);
         const isArea = category?.unitType === 'Per Luas';
-        
-        let itemTotal = calculateItemPrice(item, order.customer);
-        const isLastItem = index === fullOrder.orderItems.length - 1;
-        if (isLastItem) {
-            itemTotal += roundingDifference;
-        }
+        const itemTotal = itemTotals[index] ?? 0;
 
         const materialAndFinishing = [
             product?.name || 'N/A',
@@ -2623,36 +2628,15 @@ const Receivables: React.FC<ReceivablesProps> = ({
         phone = '62' + phone.substring(1);
     }
 
-    const calculateItemPrice = (item: OrderItemData, customerName: string): number => {
-        const custData = customers.find(c => c.name === customerName);
-        const customerLevel = custData ? custData.level : 'End Customer';
-        const priceKey = priceLevelMap[customerLevel];
-        
-        if (!item.productId) return 0;
-        const productInfo = products.find(p => p.id === item.productId);
-        const finishingInfo = finishings.find(f => f.name === item.finishing);
-        if (!productInfo) return 0;
-
-        const categoryInfo = categories.find(c => c.name === productInfo.category);
-        const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-        let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-        let priceMultiplier = 1;
-        
-        if (isAreaBased) {
-            const length = parseFloat(item.length) || 0;
-            const width = parseFloat(item.width) || 0;
-            priceMultiplier = length * width;
-        }
-        
-        const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-        const itemFinishingTotal = finishingPrice * item.qty;
-        return itemMaterialTotal + itemFinishingTotal;
-    };
-    
-    const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, order.customer), 0);
-    const roundingDifference = order.amount - unroundedTotal;
+    const { itemTotals } = resolveLockedOrderItemTotals(
+        fullOrder.orderItems,
+        order.amount,
+        order.customer,
+        productsMap,
+        categoriesMap,
+        customersMap,
+        finishingsMap
+    );
 
     const storeInfo = `*Nala Media Digital Printing*\nJl. Prof. Moh. Yamin, Cerbonan, Karanganyar\n(Timur Stadion 45)\nTelp: 0813-9872-7722`;
     const divider = '--------------------------------';
@@ -2668,12 +2652,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const product = products.find(p => p.id === item.productId);
         const category = categories.find(c => c.name === product?.category);
         const isArea = category?.unitType === 'Per Luas';
-        
-        let itemTotal = calculateItemPrice(item, order.customer);
-        const isLastItem = index === fullOrder.orderItems.length - 1;
-        if (isLastItem) {
-            itemTotal += roundingDifference;
-        }
+        const itemTotal = itemTotals[index] ?? 0;
 
         const pricePerUnit = item.qty > 0 ? itemTotal / item.qty : 0;
 
@@ -2844,8 +2823,8 @@ const Receivables: React.FC<ReceivablesProps> = ({
     const fullOrder = ordersMap.get(order.id);
     const customer = customers.find(c => c.name === order.customer);
 
-    if (!fullOrder || !customer) {
-        alert("Data order atau pelanggan tidak lengkap.");
+    if (!fullOrder) {
+        alert("Data order tidak lengkap.");
         return;
     }
 
@@ -2854,53 +2833,27 @@ const Receivables: React.FC<ReceivablesProps> = ({
     const totalTagihan = order.amount;
     const sisaTagihan = totalTagihan - (order.discount || 0) - totalPaid;
 
-    const getPriceForCustomer = (product: ProductData, customerLevel: CustomerData['level']) => {
-        const priceKey = priceLevelMap[customerLevel];
-        return product.price[priceKey] || product.price.endCustomer;
-    };
-    
     const banks = paymentMethods.filter(m => m.type === 'Transfer Bank' || m.type === 'QRIS' || m.type === 'E-Wallet');
 
-    const unroundedTotal = fullOrder.orderItems.reduce((sum, item) => {
-        const product = products.find(p => p.id === item.productId);
-        if (!product || !customer) return sum;
-
-        const category = categories.find(c => c.name === product.category);
-        const isAreaBased = category?.unitType === 'Per Luas';
-        const finishingInfo = finishings.find(f => f.name === item.finishing);
-        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-        const materialPrice = getPriceForCustomer(product, customer.level);
-        const baseItemPricePerUnit = materialPrice + finishingPrice;
-        const priceMultiplier = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
-        const hargaSatuanFinal = baseItemPricePerUnit * priceMultiplier;
-        const jumlah = hargaSatuanFinal * item.qty;
-        return sum + jumlah;
-    }, 0);
-    const roundingDifference = totalTagihan - unroundedTotal;
+    const { itemTotals } = resolveLockedOrderItemTotals(
+        fullOrder.orderItems,
+        totalTagihan,
+        order.customer,
+        productsMap,
+        categoriesMap,
+        customersMap,
+        finishingsMap
+    );
 
     const itemsHtml = fullOrder.orderItems.map((item, index) => {
         const product = products.find(p => p.id === item.productId);
-        if (!product || !customer) return '';
-
-        const category = categories.find(c => c.name === product.category);
+        const category = categories.find(c => c.name === product?.category);
         const isAreaBased = category?.unitType === 'Per Luas';
-        
-        const finishingInfo = finishings.find(f => f.name === item.finishing);
-        const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-        
-        const materialPrice = getPriceForCustomer(product, customer.level);
-        const baseItemPricePerUnit = materialPrice + finishingPrice;
-        
-        const priceMultiplier = isAreaBased ? (parseFloat(item.length) || 1) * (parseFloat(item.width) || 1) : 1;
-        const unroundedItemTotal = (baseItemPricePerUnit * priceMultiplier) * item.qty;
-        
-        const isLastItem = index === fullOrder.orderItems.length - 1;
-        const displayJumlah = isLastItem ? unroundedItemTotal + roundingDifference : unroundedItemTotal;
-        
+        const displayJumlah = itemTotals[index] ?? 0;
         const hargaSatuanFinal = item.qty > 0 ? displayJumlah / item.qty : 0;
 
         const materialAndFinishing = [
-            product.name,
+            product?.name || 'Item',
             (item.finishing && item.finishing !== 'Tanpa Finishing') ? item.finishing : ''
         ].filter(Boolean).join(' - ');
 
@@ -2908,7 +2861,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
             <tr>
                 <td class="p-3 text-center text-gray-600">${index + 1}</td>
                 <td class="p-3">
-                    <p class="font-medium text-gray-800">${item.description || product.name}</p>
+                    <p class="font-medium text-gray-800">${item.description || product?.name || 'Item'}</p>
                     <p class="text-xs text-gray-500">${materialAndFinishing}</p>
                 </td>
                 <td class="p-3 text-center text-gray-600">${isAreaBased ? `${item.length}x${item.width} m` : '-'}</td>
@@ -2968,7 +2921,7 @@ const Receivables: React.FC<ReceivablesProps> = ({
                 <section class="flex justify-between mt-4 text-sm">
                     <div>
                         <p class="font-bold text-gray-600">Ditagihkan kepada:</p>
-                        <p class="font-semibold text-gray-800">${customer?.name || 'N/A'}</p>
+                        <p class="font-semibold text-gray-800">${customer?.name || order.customer || 'N/A'}</p>
                         <div class="text-xs mt-0 text-gray-500">${customer?.contact || ''}</div>
                     </div>
                     <div class="text-right">
@@ -3075,38 +3028,6 @@ const Receivables: React.FC<ReceivablesProps> = ({
         const reportTitle = 'Laporan Piutang Pelanggan';
         const reportItems = filteredItems.filter(r => r.customer === filterCustomer);
 
-        const calculateItemPrice = (item: OrderItemData, customerName: string): number => {
-            if (item.customPrice !== undefined && item.customPrice !== null) {
-                return item.customPrice;
-            }
-
-            const customerData = customers.find(c => c.name === customerName);
-            const customerLevel = customerData ? customerData.level : 'End Customer';
-            const priceKey = priceLevelMap[customerLevel];
-            
-            if (!item.productId) return 0;
-            const productInfo = products.find(p => p.id === item.productId);
-            const finishingInfo = finishings.find(f => f.name === item.finishing);
-            if (!productInfo) return 0;
-
-            const categoryInfo = categories.find(c => c.name === productInfo.category);
-            const isAreaBased = categoryInfo?.unitType === 'Per Luas';
-
-            let materialPrice = (productInfo.price[priceKey] || productInfo.price.endCustomer);
-            const finishingPrice = finishingInfo ? finishingInfo.price : 0;
-            let priceMultiplier = 1;
-            
-            if (isAreaBased) {
-                const length = parseFloat(item.length) || 0;
-                const width = parseFloat(item.width) || 0;
-                priceMultiplier = length * width;
-            }
-            
-            const itemMaterialTotal = materialPrice * priceMultiplier * item.qty;
-            const itemFinishingTotal = finishingPrice * item.qty;
-            return itemMaterialTotal + itemFinishingTotal;
-        };
-
         const invoiceBlocks = reportItems.map(receivable => {
             const fullOrder = ordersMap.get(receivable.id);
             const orderDate = fullOrder ? fullOrder.orderDate : (receivable.isLegacy ? receivable.legacyData?.order_date : new Date().toISOString());
@@ -3123,19 +3044,21 @@ const Receivables: React.FC<ReceivablesProps> = ({
             let itemRows = '';
             
             if (fullOrder) {
-                const unroundedTotal = fullOrder.orderItems.reduce((sum, i) => sum + calculateItemPrice(i, receivable.customer), 0);
-                const roundingDifference = receivable.amount - unroundedTotal;
+                const { itemTotals } = resolveLockedOrderItemTotals(
+                    fullOrder.orderItems,
+                    receivable.amount,
+                    receivable.customer,
+                    productsMap,
+                    categoriesMap,
+                    customersMap,
+                    finishingsMap
+                );
 
                 itemRows = fullOrder.orderItems.map((item, index) => {
                     const product = products.find(p => p.id === item.productId);
                     const category = categories.find(c => c.name === product?.category);
                     const isArea = category?.unitType === 'Per Luas';
-                    
-                    let itemTotal = calculateItemPrice(item, receivable.customer);
-                    const isLastItem = index === fullOrder.orderItems.length - 1;
-                    if (isLastItem) {
-                        itemTotal += roundingDifference;
-                    }
+                    const itemTotal = itemTotals[index] ?? 0;
 
                     const sizeStr = isArea ? `${item.length}m x ${item.width}m` : '';
                     const finishStr = item.finishing && item.finishing !== 'Tanpa Finishing' ? item.finishing : '';
